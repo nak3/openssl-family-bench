@@ -21,9 +21,19 @@ env:
 
 jobs:
   openssl:
-    name: OpenSSL 3.5.7 LTS
-    runs-on: ubuntu-24.04
+    name: OpenSSL 3.5.7 LTS (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    env:
+      RESULT_ARCHITECTURE: ${{ matrix.arch }}
 
     steps:
       - name: Check out repository
@@ -64,6 +74,7 @@ jobs:
           cmake -S . -B build-openssl -G Ninja
           -DCMAKE_BUILD_TYPE=Release
           -DOFB_BACKEND=OPENSSL
+          -DOFB_RESULT_ARCHITECTURE="${RESULT_ARCHITECTURE}"
           -DOPENSSL_ROOT_DIR="${RUNNER_TEMP}/openssl-install"
           -DOPENSSL_USE_STATIC_LIBS=TRUE
 
@@ -76,18 +87,20 @@ jobs:
       - name: Run benchmark matrix
         run: |
           mkdir -p results
-          ./build-openssl/ofb-openssl --samples 3 --sample-ms 100 > results/openssl.jsonl
-          ./build-openssl/ofb-openssl-tls --samples 3 --sample-ms 100 > results/openssl-tls.jsonl
+          ./build-openssl/ofb-openssl --samples 3 --sample-ms 100 > "results/openssl-${RESULT_ARCHITECTURE}.jsonl"
+          ./build-openssl/ofb-openssl-tls --samples 3 --sample-ms 100 > "results/openssl-${RESULT_ARCHITECTURE}-tls.jsonl"
 
       - name: Validate result
         run: >-
           python3 -c 'import json, os, pathlib;
-          rows = [json.loads(line) for line in pathlib.Path("results/openssl.jsonl").read_text().splitlines()];
+          architecture = os.environ["RESULT_ARCHITECTURE"];
+          rows = [json.loads(line) for line in pathlib.Path(f"results/openssl-{architecture}.jsonl").read_text().splitlines()];
           assert len(rows) == 54;
           assert all(row["backend"] == "openssl" for row in rows);
-          tls_rows = [json.loads(line) for line in pathlib.Path("results/openssl-tls.jsonl").read_text().splitlines()];
+          tls_rows = [json.loads(line) for line in pathlib.Path(f"results/openssl-{architecture}-tls.jsonl").read_text().splitlines()];
           assert len(tls_rows) == 27;
           assert all(row["backend"] == "openssl" for row in tls_rows);
+          assert all(row["architecture"] == architecture for row in rows + tls_rows);
           expected = "OpenSSL " + os.environ["OPENSSL_VERSION"] + " ";
           assert all(row["version"].startswith(expected) for row in rows + tls_rows);
           print(f"validated {len(rows)} primitive and {len(tls_rows)} TLS OpenSSL samples")'
@@ -95,23 +108,31 @@ jobs:
       - name: Publish OpenSSL job summary
         run: >-
           python3 scripts/summarize_results.py results
-          --title "OpenSSL benchmark results"
+          --title "OpenSSL benchmark results (${{ matrix.arch }})"
           --output "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload benchmark result
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: benchmark-openssl-${{ env.OPENSSL_VERSION }}-${{ github.sha }}
-          path: |
-            results/openssl.jsonl
-            results/openssl-tls.jsonl
+          name: benchmark-openssl-${{ env.OPENSSL_VERSION }}-${{ matrix.arch }}-${{ github.sha }}
+          path: results/*.jsonl
           if-no-files-found: error
           retention-days: 14
 
   libressl:
-    name: LibreSSL 4.3.2 baseline and patched
-    runs-on: ubuntu-24.04
+    name: LibreSSL 4.3.2 baseline and patched (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    env:
+      RESULT_ARCHITECTURE: ${{ matrix.arch }}
 
     steps:
       - name: Check out repository
@@ -150,6 +171,7 @@ jobs:
           cmake -S . -B build-libressl -G Ninja
           -DCMAKE_BUILD_TYPE=Release
           -DOFB_BACKEND=LIBRESSL
+          -DOFB_RESULT_ARCHITECTURE="${RESULT_ARCHITECTURE}"
           -DLibreSSL_DIR="${RUNNER_TEMP}/libressl-baseline-build"
 
       - name: Build baseline benchmark
@@ -183,6 +205,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -DOFB_BACKEND=LIBRESSL
           -DOFB_RESULT_BACKEND=libressl-patched
+          -DOFB_RESULT_ARCHITECTURE="${RESULT_ARCHITECTURE}"
           -DLibreSSL_DIR="${RUNNER_TEMP}/libressl-patched-build"
 
       - name: Build patched benchmark
@@ -194,41 +217,39 @@ jobs:
       - name: Run benchmark matrix
         run: |
           mkdir -p results
-          ./build-libressl/ofb-libressl --samples 3 --sample-ms 100 > results/libressl.jsonl
-          ./build-libressl/ofb-libressl-tls --samples 3 --sample-ms 100 > results/libressl-tls.jsonl
-          ./build-libressl-patched/ofb-libressl --samples 3 --sample-ms 100 > results/libressl-patched.jsonl
-          ./build-libressl-patched/ofb-libressl-tls --samples 3 --sample-ms 100 > results/libressl-patched-tls.jsonl
+          ./build-libressl/ofb-libressl --samples 3 --sample-ms 100 > "results/libressl-${RESULT_ARCHITECTURE}.jsonl"
+          ./build-libressl/ofb-libressl-tls --samples 3 --sample-ms 100 > "results/libressl-${RESULT_ARCHITECTURE}-tls.jsonl"
+          ./build-libressl-patched/ofb-libressl --samples 3 --sample-ms 100 > "results/libressl-patched-${RESULT_ARCHITECTURE}.jsonl"
+          ./build-libressl-patched/ofb-libressl-tls --samples 3 --sample-ms 100 > "results/libressl-patched-${RESULT_ARCHITECTURE}-tls.jsonl"
 
       - name: Validate result
         run: >-
-          python3 -c 'import json, pathlib;
-          rows = [json.loads(line) for line in pathlib.Path("results/libressl.jsonl").read_text().splitlines()];
+          python3 -c 'import json, os, pathlib;
+          architecture = os.environ["RESULT_ARCHITECTURE"];
+          rows = [json.loads(line) for line in pathlib.Path(f"results/libressl-{architecture}.jsonl").read_text().splitlines()];
           assert len(rows) == 54;
           assert all(row["backend"] == "libressl" for row in rows);
-          tls_rows = [json.loads(line) for line in pathlib.Path("results/libressl-tls.jsonl").read_text().splitlines()];
+          tls_rows = [json.loads(line) for line in pathlib.Path(f"results/libressl-{architecture}-tls.jsonl").read_text().splitlines()];
           assert len(tls_rows) == 27;
           assert all(row["backend"] == "libressl" for row in tls_rows);
-          patched = [json.loads(line) for line in pathlib.Path("results/libressl-patched.jsonl").read_text().splitlines()];
-          patched_tls = [json.loads(line) for line in pathlib.Path("results/libressl-patched-tls.jsonl").read_text().splitlines()];
+          patched = [json.loads(line) for line in pathlib.Path(f"results/libressl-patched-{architecture}.jsonl").read_text().splitlines()];
+          patched_tls = [json.loads(line) for line in pathlib.Path(f"results/libressl-patched-{architecture}-tls.jsonl").read_text().splitlines()];
           assert len(patched) == 54 and len(patched_tls) == 27;
           assert all(row["backend"] == "libressl-patched" for row in patched + patched_tls);
+          assert all(row["architecture"] == architecture for row in rows + tls_rows + patched + patched_tls);
           print(f"validated baseline and patched LibreSSL results")'
 
       - name: Publish LibreSSL job summary
         run: >-
           python3 scripts/summarize_results.py results
-          --title "LibreSSL benchmark results"
+          --title "LibreSSL benchmark results (${{ matrix.arch }})"
           --output "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload benchmark result
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: benchmark-libressl-${{ env.LIBRESSL_VERSION }}-${{ github.sha }}
-          path: |
-            results/libressl.jsonl
-            results/libressl-tls.jsonl
-            results/libressl-patched.jsonl
-            results/libressl-patched-tls.jsonl
+          name: benchmark-libressl-${{ env.LIBRESSL_VERSION }}-${{ matrix.arch }}-${{ github.sha }}
+          path: results/*.jsonl
           if-no-files-found: error
           retention-days: 14
 
@@ -242,17 +263,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Download OpenSSL result
+      - name: Download all benchmark results
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: benchmark-openssl-${{ env.OPENSSL_VERSION }}-${{ github.sha }}
-          path: comparison/openssl
-
-      - name: Download LibreSSL result
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: benchmark-libressl-${{ env.LIBRESSL_VERSION }}-${{ github.sha }}
-          path: comparison/libressl
+          pattern: benchmark-*-${{ github.sha }}
+          path: comparison
+          merge-multiple: true
 
       - name: Publish comparison summary
         run: >-

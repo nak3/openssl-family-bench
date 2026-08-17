@@ -51,6 +51,11 @@ def backend_order(backends):
     return sorted(backends, key=lambda name: (preferred.get(name, 99), name))
 
 
+def architecture_order(architectures):
+    preferred = {"x86_64": 0, "arm64": 1}
+    return sorted(architectures, key=lambda name: (preferred.get(name, 99), name))
+
+
 def ratio_cell(values):
     if "openssl" not in values or "libressl" not in values or values["libressl"] == 0:
         return "—"
@@ -98,16 +103,13 @@ def aggregate(rows, key_fields, metric):
     return result
 
 
-def render(rows, title):
+def render_architecture(rows, architecture):
     backends = backend_order({row["backend"] for row in rows})
     versions = {}
     for row in rows:
         versions[row["backend"]] = row.get("version", "unknown")
 
-    lines = [f"# {title}", ""]
-    lines.append("> Values are medians of the raw samples. Higher is better.")
-    lines.append("> GitHub-hosted runner performance can vary between workflow runs.")
-    lines.append("")
+    lines = [f"## Architecture: `{architecture}`", ""]
 
     append_table(
         lines,
@@ -117,7 +119,7 @@ def render(rows, title):
 
     primitive_rows = [row for row in rows if "algorithm" in row]
     if primitive_rows:
-        lines.extend(["## AEAD primitive throughput", ""])
+        lines.extend(["### AEAD primitive throughput", ""])
         data = aggregate(
             primitive_rows,
             ("algorithm", "operation", "message_bytes"),
@@ -140,7 +142,7 @@ def render(rows, title):
         row for row in rows if row.get("benchmark") == "tls-handshake"
     ]
     if handshake_rows:
-        lines.extend(["## TLS 1.3 full handshake", ""])
+        lines.extend(["### TLS 1.3 full handshake", ""])
         data = aggregate(handshake_rows, ("cipher",), "handshakes_per_second")
         headings = ["Cipher"]
         headings.extend(
@@ -161,7 +163,7 @@ def render(rows, title):
         row for row in rows if row.get("benchmark") == "tls-transfer"
     ]
     if transfer_rows:
-        lines.extend(["## TLS 1.3 application-data throughput", ""])
+        lines.extend(["### TLS 1.3 application-data throughput", ""])
         data = aggregate(
             transfer_rows, ("cipher", "message_bytes"), "mib_per_second"
         )
@@ -177,6 +179,22 @@ def render(rows, title):
             append_ratios(row, values, backends)
             table_rows.append(row)
         append_table(lines, headings, table_rows)
+
+    return lines
+
+
+def render(rows, title):
+    lines = [f"# {title}", ""]
+    lines.append("> Values are medians of the raw samples. Higher is better.")
+    lines.append("> Compare backends within one architecture; runner hardware differs across architectures.")
+    lines.append("> GitHub-hosted runner performance can vary between workflow runs.")
+    lines.append("")
+
+    by_architecture = defaultdict(list)
+    for row in rows:
+        by_architecture[row.get("architecture", "unknown")].append(row)
+    for architecture in architecture_order(by_architecture):
+        lines.extend(render_architecture(by_architecture[architecture], architecture))
 
     return "\n".join(lines).rstrip() + "\n"
 

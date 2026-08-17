@@ -137,12 +137,14 @@ samples for both builds remain in the LibreSSL artifact.
 
 ### GitHub Actions
 
-The `Benchmark` workflow downloads and verifies the official OpenSSL 3.5.7 LTS
-release, then builds it from source as static libraries. It does not use
-Ubuntu's `libssl-dev`. Both baseline and patched LibreSSL are also built from
-the pinned official LibreSSL Portable 4.3.2 archive. CI then runs the complete
-AEAD and TLS 1.3 matrices with three 100 ms samples per case and uploads the raw
-JSON Lines files as workflow artifacts for 14 days.
+The `Benchmark` workflow runs natively on both x86_64 (`ubuntu-24.04`) and
+ARM64 (`ubuntu-24.04-arm`) GitHub-hosted runners. On each architecture it
+downloads and verifies the official OpenSSL 3.5.7 LTS release, then builds it
+from source as static libraries. It does not use Ubuntu's `libssl-dev`. Both
+baseline and patched LibreSSL are also built from the pinned official LibreSSL
+Portable 4.3.2 archive. CI then runs the complete AEAD and TLS 1.3 matrices with
+three 100 ms samples per case and uploads the raw JSON Lines files as workflow
+artifacts for 14 days.
 
 OpenSSL and LibreSSL versions and SHA-256 values are declared in the workflow's
 top-level `env` section. Update the version and checksum together when changing
@@ -153,7 +155,11 @@ Each backend job publishes a Markdown table to its GitHub Actions Job Summary.
 A final `OpenSSL vs LibreSSL summary` job shows median results side by side,
 including the OpenSSL/baseline and patched/baseline ratios, so the common results
 can be inspected without downloading artifacts. The artifacts remain available
-for raw-sample analysis.
+for raw-sample analysis. Results are grouped by the `architecture` field and
+ratios are only calculated between backends running on the same architecture.
+Do not interpret the absolute x86_64/ARM64 difference as an ISA-only comparison:
+the hosted runners also use different physical CPUs and may have different
+clock, cache, and virtualization characteristics.
 
 GitHub-hosted runners are shared and their CPU performance varies between runs.
 Treat these artifacts as build/correctness evidence and exploratory benchmark

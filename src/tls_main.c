@@ -165,11 +165,13 @@ run_case(const struct options *options, const char *cipher,
         }
 
         if (strcmp(options->format, "jsonl") == 0) {
-            printf("{\"schema_version\":1,\"backend\":\"%s\",\"version\":\"%s\","
+            printf("{\"schema_version\":1,\"architecture\":\"%s\","
+                   "\"backend\":\"%s\",\"version\":\"%s\","
                    "\"benchmark\":\"tls-%s\",\"tls_version\":\"TLSv1.3\","
                    "\"cipher\":\"%s\",\"message_bytes\":%zu,\"sample\":%u,"
                    "\"iterations\":%" PRIu64 ",\"elapsed_ns\":%" PRIu64,
-                   info->name, info->version, benchmark_name, cipher,
+                   OFB_ARCHITECTURE, info->name, info->version,
+                   benchmark_name, cipher,
                    message_size, i, sample.iterations, sample.elapsed_ns);
             if (benchmark == OFB_TLS_HANDSHAKE) {
                 printf(",\"handshakes_per_second\":%.3Lf}\n", rate);

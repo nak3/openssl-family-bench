@@ -99,12 +99,14 @@ run_case(const struct options *options, const char *algorithm,
         mib_per_second = (long double) sample.bytes * 1000000000.0L /
                          (long double) sample.elapsed_ns / 1048576.0L;
         if (strcmp(options->format, "jsonl") == 0) {
-            printf("{\"schema_version\":1,\"backend\":\"%s\",\"version\":\"%s\","
+            printf("{\"schema_version\":1,\"architecture\":\"%s\","
+                   "\"backend\":\"%s\",\"version\":\"%s\","
                    "\"algorithm\":\"%s\",\"operation\":\"%s\","
                    "\"message_bytes\":%zu,\"aad_bytes\":%zu,\"sample\":%u,"
                    "\"iterations\":%" PRIu64 ",\"elapsed_ns\":%" PRIu64 ","
                    "\"bytes\":%" PRIu64 ",\"mib_per_second\":%.3Lf}\n",
-                   backend_info->name, backend_info->version, algorithm, operation_name,
+                   OFB_ARCHITECTURE, backend_info->name, backend_info->version,
+                   algorithm, operation_name,
                    message_size, options->aad_size, i, sample.iterations,
                    sample.elapsed_ns, sample.bytes, mib_per_second);
         } else {

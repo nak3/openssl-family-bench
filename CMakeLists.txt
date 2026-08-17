@@ -28,6 +28,8 @@ endif()
 
 set(OFB_RESULT_BACKEND "${OFB_BACKEND_NAME}" CACHE STRING
     "Backend label written to benchmark results")
+set(OFB_RESULT_ARCHITECTURE "${CMAKE_SYSTEM_PROCESSOR}" CACHE STRING
+    "Architecture label written to benchmark results")
 
 add_executable(${OFB_TARGET}
     src/main.c
@@ -47,6 +49,7 @@ target_link_libraries(${OFB_TARGET} PRIVATE ${OFB_CRYPTO_TARGET})
 target_compile_features(${OFB_TARGET} PRIVATE c_std_11)
 target_compile_definitions(${OFB_TARGET} PRIVATE
     OFB_BACKEND_NAME="${OFB_RESULT_BACKEND}"
+    OFB_ARCHITECTURE="${OFB_RESULT_ARCHITECTURE}"
 )
 
 target_include_directories(${OFB_TLS_TARGET} PRIVATE include)
@@ -57,6 +60,7 @@ target_link_libraries(${OFB_TLS_TARGET} PRIVATE
 target_compile_features(${OFB_TLS_TARGET} PRIVATE c_std_11)
 target_compile_definitions(${OFB_TLS_TARGET} PRIVATE
     OFB_BACKEND_NAME="${OFB_RESULT_BACKEND}"
+    OFB_ARCHITECTURE="${OFB_RESULT_ARCHITECTURE}"
     OFB_DEFAULT_CERT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/testdata/server-cert.pem"
     OFB_DEFAULT_KEY_PATH="${CMAKE_CURRENT_SOURCE_DIR}/testdata/server-key.pem"
 )
