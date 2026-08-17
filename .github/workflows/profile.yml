@@ -1,0 +1,144 @@
+name: AEAD Profile
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: profile-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  OPENSSL_VERSION: 3.5.7
+  OPENSSL_SHA256: a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8
+  LIBRESSL_VERSION: 4.3.2
+  LIBRESSL_SHA256: edf01aee24c65d69e6a9efcb9d44bcda682ff9d4f3bbbd95e794e1dfa90847b5
+
+jobs:
+  profile:
+    name: AEAD perf profile (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install build and profiling dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes build-essential cmake ninja-build patch perl linux-tools-common
+          sudo apt-get install --yes "linux-tools-$(uname -r)" || sudo apt-get install --yes linux-tools-generic
+          if ! perf --version; then
+            perf_path=$(find /usr/lib/linux-tools -type f -name perf | sort -V | tail -n 1)
+            test -n "${perf_path}"
+            sudo ln --symbolic --force "${perf_path}" /usr/local/bin/perf
+          fi
+          perf --version
+          sudo sysctl -w kernel.perf_event_paranoid=-1 || true
+
+      - name: Download and verify source archives
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl --fail --location --retry 3 \
+            --output "openssl-${OPENSSL_VERSION}.tar.gz" \
+            "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
+          echo "${OPENSSL_SHA256}  openssl-${OPENSSL_VERSION}.tar.gz" | sha256sum --check --strict
+          mkdir openssl-profile-source
+          tar --extract --gzip --file "openssl-${OPENSSL_VERSION}.tar.gz" \
+            --strip-components=1 --directory openssl-profile-source
+
+          curl --fail --location --retry 3 \
+            --output "libressl-${LIBRESSL_VERSION}.tar.gz" \
+            "https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-${LIBRESSL_VERSION}.tar.gz"
+          echo "${LIBRESSL_SHA256}  libressl-${LIBRESSL_VERSION}.tar.gz" | sha256sum --check --strict
+          mkdir libressl-profile-source
+          tar --extract --gzip --file "libressl-${LIBRESSL_VERSION}.tar.gz" \
+            --strip-components=1 --directory libressl-profile-source
+
+      - name: Build instrumented OpenSSL
+        working-directory: ${{ runner.temp }}/openssl-profile-source
+        run: |
+          CFLAGS="-O3 -g -fno-omit-frame-pointer" ./Configure \
+            --prefix="${RUNNER_TEMP}/openssl-profile-install" \
+            --libdir=lib \
+            no-shared \
+            no-tests \
+            no-docs
+          make --jobs "$(nproc)"
+          make install_sw
+
+      - name: Build instrumented LibreSSL
+        run: |
+          cmake \
+            -S "${RUNNER_TEMP}/libressl-profile-source" \
+            -B "${RUNNER_TEMP}/libressl-profile-build" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O3 -g -fno-omit-frame-pointer -DNDEBUG" \
+            -DLIBRESSL_APPS=OFF \
+            -DLIBRESSL_TESTS=OFF
+          cmake --build "${RUNNER_TEMP}/libressl-profile-build" --parallel
+
+      - name: Build instrumented benchmark executables
+        run: |
+          cmake -S . -B profile-build-openssl -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O3 -g -fno-omit-frame-pointer -DNDEBUG" \
+            -DOFB_BACKEND=OPENSSL \
+            -DOFB_RESULT_ARCHITECTURE="${{ matrix.arch }}" \
+            -DOPENSSL_ROOT_DIR="${RUNNER_TEMP}/openssl-profile-install" \
+            -DOPENSSL_USE_STATIC_LIBS=TRUE
+          cmake --build profile-build-openssl --parallel
+          ctest --test-dir profile-build-openssl --output-on-failure
+
+          cmake -S . -B profile-build-libressl -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O3 -g -fno-omit-frame-pointer -DNDEBUG" \
+            -DOFB_BACKEND=LIBRESSL \
+            -DOFB_RESULT_ARCHITECTURE="${{ matrix.arch }}" \
+            -DLibreSSL_DIR="${RUNNER_TEMP}/libressl-profile-build"
+          cmake --build profile-build-libressl --parallel
+          ctest --test-dir profile-build-libressl --output-on-failure
+
+      - name: Capture perf profiles
+        run: |
+          scripts/profile_aead.sh openssl "${{ matrix.arch }}" \
+            ./profile-build-openssl/ofb-openssl profiles
+          scripts/profile_aead.sh libressl "${{ matrix.arch }}" \
+            ./profile-build-libressl/ofb-libressl profiles
+
+      - name: Publish profile visualization
+        run: |
+          python3 scripts/summarize_profiles.py profiles \
+            --title "AEAD perf profiles (${{ matrix.arch }})" \
+            --output profile-summary.md
+          {
+            echo '## Runner CPU'
+            echo
+            echo '```text'
+            lscpu | grep -E '^(Architecture|Model name|CPU\(s\)|Thread|Core|Socket|Flags|Features):'
+            echo '```'
+            echo
+            cat profile-summary.md
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload perf profiles
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: perf-aead-${{ matrix.arch }}-${{ github.sha }}
+          path: |
+            profiles/
+            profile-summary.md
+          if-no-files-found: error
+          retention-days: 14

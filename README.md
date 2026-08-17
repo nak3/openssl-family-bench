@@ -168,11 +168,11 @@ self-hosted runner when reproducible performance comparisons are required.
 
 #### perf profiling
 
-Use **Run workflow** on the `Benchmark` workflow and enable
-`Run perf profiling and publish hotspot charts` to start separate x86_64 and
-ARM64 profiling jobs. These jobs build OpenSSL and baseline LibreSSL with `-O3`,
-debug symbols, and frame pointers, then profile AES-128-GCM seal/open operations
-at 64 and 16384 bytes.
+Use **Run workflow** on the dedicated `AEAD Profile` workflow to start separate
+x86_64 and ARM64 profiling jobs. These jobs build OpenSSL and baseline LibreSSL
+with `-O3`, debug symbols, and frame pointers, then profile AES-128-GCM seal/open
+operations at 64 and 16384 bytes. The regular `Benchmark` workflow does not show
+skipped profiling placeholders on pushes or pull requests.
 
 Each profiling Job Summary contains the runner CPU description, available
 hardware or software counters, and text bar charts for the hottest symbols.
