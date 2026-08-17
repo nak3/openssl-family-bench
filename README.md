@@ -166,6 +166,21 @@ Treat these artifacts as build/correctness evidence and exploratory benchmark
 data, not as a stable performance-regression threshold. Use a pinned
 self-hosted runner when reproducible performance comparisons are required.
 
+#### perf profiling
+
+Use **Run workflow** on the `Benchmark` workflow and enable
+`Run perf profiling and publish hotspot charts` to start separate x86_64 and
+ARM64 profiling jobs. These jobs build OpenSSL and baseline LibreSSL with `-O3`,
+debug symbols, and frame pointers, then profile AES-128-GCM seal/open operations
+at 64 and 16384 bytes.
+
+Each profiling Job Summary contains the runner CPU description, available
+hardware or software counters, and text bar charts for the hottest symbols.
+The corresponding artifact contains the CSV counters, full text reports, and
+`perf.data` recordings for local `perf report` or `perf annotate` analysis.
+Profiling is opt-in because sampling and debug metadata can perturb timing; its
+numbers are intentionally kept separate from the regular benchmark summary.
+
 [Source code](cryptobench.c)
 
 Benchmarked on a [Scaleway PRO 2](https://www.scaleway.com/en/virtual-instances/pro2/) instance (AMD 3rd Gen EPYC™ 7003).
