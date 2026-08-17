@@ -6,3 +6,4 @@ build-*/
 results/
 *.o
 *.dSYM/
+__pycache__/

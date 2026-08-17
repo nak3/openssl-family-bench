@@ -118,6 +118,11 @@ Ubuntu. It then runs the complete AEAD and TLS 1.3 matrices with three 100 ms
 samples per case and uploads the raw JSON Lines files as workflow artifacts for 14 days.
 The workflow runs for pushes, pull requests, and manual dispatches.
 
+Each backend job publishes a Markdown table to its GitHub Actions Job Summary.
+A final `OpenSSL vs LibreSSL summary` job shows median results side by side and
+the OpenSSL/LibreSSL ratio, so the common results can be inspected without
+downloading artifacts. The artifacts remain available for raw-sample analysis.
+
 GitHub-hosted runners are shared and their CPU performance varies between runs.
 Treat these artifacts as build/correctness evidence and exploratory benchmark
 data, not as a stable performance-regression threshold. Use a pinned
