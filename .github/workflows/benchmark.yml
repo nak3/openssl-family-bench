@@ -1,0 +1,130 @@
+name: Benchmark
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmark-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LIBRESSL_VERSION: 4.3.2
+  LIBRESSL_SHA256: edf01aee24c65d69e6a9efcb9d44bcda682ff9d4f3bbbd95e794e1dfa90847b5
+
+jobs:
+  openssl:
+    name: OpenSSL
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install --yes cmake ninja-build libssl-dev
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build-openssl -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DOFB_BACKEND=OPENSSL
+
+      - name: Build
+        run: cmake --build build-openssl --parallel
+
+      - name: Test
+        run: ctest --test-dir build-openssl --output-on-failure
+
+      - name: Run benchmark matrix
+        run: |
+          mkdir -p results
+          ./build-openssl/ofb-openssl --samples 3 --sample-ms 100 > results/openssl.jsonl
+
+      - name: Validate result
+        run: >-
+          python3 -c 'import json, pathlib;
+          rows = [json.loads(line) for line in pathlib.Path("results/openssl.jsonl").read_text().splitlines()];
+          assert len(rows) == 54;
+          assert all(row["backend"] == "openssl" for row in rows);
+          print(f"validated {len(rows)} OpenSSL samples")'
+
+      - name: Upload benchmark result
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: benchmark-openssl-${{ github.sha }}
+          path: results/openssl.jsonl
+          if-no-files-found: error
+          retention-days: 14
+
+  libressl:
+    name: LibreSSL 4.3.2
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install --yes cmake ninja-build
+
+      - name: Download and verify LibreSSL
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl --fail --location --retry 3 \
+            --output "libressl-${LIBRESSL_VERSION}.tar.gz" \
+            "https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-${LIBRESSL_VERSION}.tar.gz"
+          echo "${LIBRESSL_SHA256}  libressl-${LIBRESSL_VERSION}.tar.gz" | sha256sum --check --strict
+          tar --extract --gzip --file "libressl-${LIBRESSL_VERSION}.tar.gz"
+
+      - name: Build LibreSSL
+        run: >-
+          cmake
+          -S "${RUNNER_TEMP}/libressl-${LIBRESSL_VERSION}"
+          -B "${RUNNER_TEMP}/libressl-build"
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DLIBRESSL_APPS=OFF
+          -DLIBRESSL_TESTS=OFF
+      - name: Compile LibreSSL
+        run: cmake --build "${RUNNER_TEMP}/libressl-build" --parallel
+
+      - name: Configure benchmark
+        run: >-
+          cmake -S . -B build-libressl -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DOFB_BACKEND=LIBRESSL
+          -DLibreSSL_DIR="${RUNNER_TEMP}/libressl-build"
+
+      - name: Build benchmark
+        run: cmake --build build-libressl --parallel
+
+      - name: Test
+        run: ctest --test-dir build-libressl --output-on-failure
+
+      - name: Run benchmark matrix
+        run: |
+          mkdir -p results
+          ./build-libressl/ofb-libressl --samples 3 --sample-ms 100 > results/libressl.jsonl
+
+      - name: Validate result
+        run: >-
+          python3 -c 'import json, pathlib;
+          rows = [json.loads(line) for line in pathlib.Path("results/libressl.jsonl").read_text().splitlines()];
+          assert len(rows) == 54;
+          assert all(row["backend"] == "libressl" for row in rows);
+          print(f"validated {len(rows)} LibreSSL samples")'
+
+      - name: Upload benchmark result
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: benchmark-libressl-${{ env.LIBRESSL_VERSION }}-${{ github.sha }}
+          path: results/libressl.jsonl
+          if-no-files-found: error
+          retention-days: 14
