@@ -137,10 +137,16 @@ samples for both builds remain in the LibreSSL artifact.
 
 ### GitHub Actions
 
-The `Benchmark` workflow builds OpenSSL and both baseline and patched LibreSSL on
-Ubuntu. It then runs the complete AEAD and TLS 1.3 matrices with three 100 ms
-samples per case and uploads the raw JSON Lines files as workflow artifacts for
-14 days.
+The `Benchmark` workflow downloads and verifies the official OpenSSL 3.5.7 LTS
+release, then builds it from source as static libraries. It does not use
+Ubuntu's `libssl-dev`. Both baseline and patched LibreSSL are also built from
+the pinned official LibreSSL Portable 4.3.2 archive. CI then runs the complete
+AEAD and TLS 1.3 matrices with three 100 ms samples per case and uploads the raw
+JSON Lines files as workflow artifacts for 14 days.
+
+OpenSSL and LibreSSL versions and SHA-256 values are declared in the workflow's
+top-level `env` section. Update the version and checksum together when changing
+a pinned release.
 The workflow runs for pushes, pull requests, and manual dispatches.
 
 Each backend job publishes a Markdown table to its GitHub Actions Job Summary.
