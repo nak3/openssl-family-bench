@@ -45,6 +45,7 @@ jobs:
         run: |
           mkdir -p results
           ./build-openssl/ofb-openssl --samples 3 --sample-ms 100 > results/openssl.jsonl
+          ./build-openssl/ofb-openssl-tls --samples 3 --sample-ms 100 > results/openssl-tls.jsonl
 
       - name: Validate result
         run: >-
@@ -52,13 +53,18 @@ jobs:
           rows = [json.loads(line) for line in pathlib.Path("results/openssl.jsonl").read_text().splitlines()];
           assert len(rows) == 54;
           assert all(row["backend"] == "openssl" for row in rows);
-          print(f"validated {len(rows)} OpenSSL samples")'
+          tls_rows = [json.loads(line) for line in pathlib.Path("results/openssl-tls.jsonl").read_text().splitlines()];
+          assert len(tls_rows) == 27;
+          assert all(row["backend"] == "openssl" for row in tls_rows);
+          print(f"validated {len(rows)} primitive and {len(tls_rows)} TLS OpenSSL samples")'
 
       - name: Upload benchmark result
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: benchmark-openssl-${{ github.sha }}
-          path: results/openssl.jsonl
+          path: |
+            results/openssl.jsonl
+            results/openssl-tls.jsonl
           if-no-files-found: error
           retention-days: 14
 
@@ -112,6 +118,7 @@ jobs:
         run: |
           mkdir -p results
           ./build-libressl/ofb-libressl --samples 3 --sample-ms 100 > results/libressl.jsonl
+          ./build-libressl/ofb-libressl-tls --samples 3 --sample-ms 100 > results/libressl-tls.jsonl
 
       - name: Validate result
         run: >-
@@ -119,12 +126,17 @@ jobs:
           rows = [json.loads(line) for line in pathlib.Path("results/libressl.jsonl").read_text().splitlines()];
           assert len(rows) == 54;
           assert all(row["backend"] == "libressl" for row in rows);
-          print(f"validated {len(rows)} LibreSSL samples")'
+          tls_rows = [json.loads(line) for line in pathlib.Path("results/libressl-tls.jsonl").read_text().splitlines()];
+          assert len(tls_rows) == 27;
+          assert all(row["backend"] == "libressl" for row in tls_rows);
+          print(f"validated {len(rows)} primitive and {len(tls_rows)} TLS LibreSSL samples")'
 
       - name: Upload benchmark result
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: benchmark-libressl-${{ env.LIBRESSL_VERSION }}-${{ github.sha }}
-          path: results/libressl.jsonl
+          path: |
+            results/libressl.jsonl
+            results/libressl-tls.jsonl
           if-no-files-found: error
           retention-days: 14

@@ -62,6 +62,37 @@ can be regenerated later.
 Use `./build/ofb-openssl --help` for all options and `--list` for the algorithms
 provided by the linked backend.
 
+### TLS 1.3
+
+The TLS runner connects an in-process client and server with a memory BIO pair.
+It measures full handshakes and application-data transfer without kernel socket
+or network latency:
+
+```sh
+./build/ofb-openssl-tls \
+  --benchmark handshake \
+  --cipher TLS_AES_128_GCM_SHA256 \
+  --samples 7 \
+  --sample-ms 250 \
+  --format text
+
+./build/ofb-openssl-tls \
+  --benchmark transfer \
+  --cipher TLS_AES_128_GCM_SHA256 \
+  --size 16384 \
+  --samples 7 \
+  --sample-ms 250 \
+  --format text
+```
+
+`handshake` includes creating the client/server SSL objects, memory BIOs, the
+TLS 1.3 state machine, key exchange, certificate signature, and key schedule.
+The SSL contexts and certificate parsing stay outside the timed region.
+`transfer` reuses a connection established outside the timed region and
+measures client-to-server `SSL_write`/`SSL_read` processing. The bundled
+certificate and private key are public test fixtures and must never be used by
+a real server.
+
 ### LibreSSL
 
 Build LibreSSL as a separate executable and use its generated CMake package:
@@ -74,6 +105,7 @@ cmake -S . -B build-libressl \
 cmake --build build-libressl --parallel
 ctest --test-dir build-libressl --output-on-failure
 ./build-libressl/ofb-libressl --format text
+./build-libressl/ofb-libressl-tls --format text
 ```
 
 Always use a different build directory for each backend. This prevents CMake's
@@ -82,8 +114,8 @@ cached include and library paths from accidentally mixing OpenSSL and LibreSSL.
 ### GitHub Actions
 
 The `Benchmark` workflow builds and tests OpenSSL and LibreSSL independently on
-Ubuntu. It then runs the complete AEAD matrix with three 100 ms samples per
-case and uploads the raw JSON Lines files as workflow artifacts for 14 days.
+Ubuntu. It then runs the complete AEAD and TLS 1.3 matrices with three 100 ms
+samples per case and uploads the raw JSON Lines files as workflow artifacts for 14 days.
 The workflow runs for pushes, pull requests, and manual dispatches.
 
 GitHub-hosted runners are shared and their CPU performance varies between runs.
