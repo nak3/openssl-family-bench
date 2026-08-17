@@ -26,6 +26,9 @@ else()
     message(FATAL_ERROR "Unsupported OFB_BACKEND: ${OFB_BACKEND}")
 endif()
 
+set(OFB_RESULT_BACKEND "${OFB_BACKEND_NAME}" CACHE STRING
+    "Backend label written to benchmark results")
+
 add_executable(${OFB_TARGET}
     src/main.c
     src/runner.c
@@ -43,7 +46,7 @@ target_include_directories(${OFB_TARGET} PRIVATE include)
 target_link_libraries(${OFB_TARGET} PRIVATE ${OFB_CRYPTO_TARGET})
 target_compile_features(${OFB_TARGET} PRIVATE c_std_11)
 target_compile_definitions(${OFB_TARGET} PRIVATE
-    OFB_BACKEND_NAME="${OFB_BACKEND_NAME}"
+    OFB_BACKEND_NAME="${OFB_RESULT_BACKEND}"
 )
 
 target_include_directories(${OFB_TLS_TARGET} PRIVATE include)
@@ -53,7 +56,7 @@ target_link_libraries(${OFB_TLS_TARGET} PRIVATE
 )
 target_compile_features(${OFB_TLS_TARGET} PRIVATE c_std_11)
 target_compile_definitions(${OFB_TLS_TARGET} PRIVATE
-    OFB_BACKEND_NAME="${OFB_BACKEND_NAME}"
+    OFB_BACKEND_NAME="${OFB_RESULT_BACKEND}"
     OFB_DEFAULT_CERT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/testdata/server-cert.pem"
     OFB_DEFAULT_KEY_PATH="${CMAKE_CURRENT_SOURCE_DIR}/testdata/server-key.pem"
 )

@@ -39,13 +39,15 @@ def format_rate(value):
 
 
 def display_backend(backend):
-    return {"openssl": "OpenSSL", "libressl": "LibreSSL"}.get(
-        backend, backend
-    )
+    return {
+        "openssl": "OpenSSL",
+        "libressl": "LibreSSL baseline",
+        "libressl-patched": "LibreSSL patched",
+    }.get(backend, backend)
 
 
 def backend_order(backends):
-    preferred = {"openssl": 0, "libressl": 1}
+    preferred = {"openssl": 0, "libressl": 1, "libressl-patched": 2}
     return sorted(backends, key=lambda name: (preferred.get(name, 99), name))
 
 
@@ -53,6 +55,27 @@ def ratio_cell(values):
     if "openssl" not in values or "libressl" not in values or values["libressl"] == 0:
         return "—"
     return f'{values["openssl"] / values["libressl"]:.2f}×'
+
+
+def patched_ratio_cell(values):
+    if ("libressl-patched" not in values or "libressl" not in values or
+            values["libressl"] == 0):
+        return "—"
+    return f'{values["libressl-patched"] / values["libressl"]:.3f}×'
+
+
+def append_ratio_headings(headings, backends):
+    if "openssl" in backends and "libressl" in backends:
+        headings.append("OpenSSL / baseline")
+    if "libressl-patched" in backends and "libressl" in backends:
+        headings.append("Patched / baseline")
+
+
+def append_ratios(row, values, backends):
+    if "openssl" in backends and "libressl" in backends:
+        row.append(ratio_cell(values))
+    if "libressl-patched" in backends and "libressl" in backends:
+        row.append(patched_ratio_cell(values))
 
 
 def append_table(lines, headings, rows):
@@ -102,16 +125,14 @@ def render(rows, title):
         )
         headings = ["Algorithm", "Operation", "Bytes"]
         headings.extend(f"{display_backend(backend)} MiB/s" for backend in backends)
-        if "openssl" in backends and "libressl" in backends:
-            headings.append("OpenSSL / LibreSSL")
+        append_ratio_headings(headings, backends)
         table_rows = []
         for key in sorted(data):
             values = data[key]
             row = [key[0], key[1], str(key[2])]
             row.extend(format_rate(values[backend]) if backend in values else "—"
                        for backend in backends)
-            if "openssl" in backends and "libressl" in backends:
-                row.append(ratio_cell(values))
+            append_ratios(row, values, backends)
             table_rows.append(row)
         append_table(lines, headings, table_rows)
 
@@ -125,16 +146,14 @@ def render(rows, title):
         headings.extend(
             f"{display_backend(backend)} handshakes/s" for backend in backends
         )
-        if "openssl" in backends and "libressl" in backends:
-            headings.append("OpenSSL / LibreSSL")
+        append_ratio_headings(headings, backends)
         table_rows = []
         for key in sorted(data):
             values = data[key]
             row = [key[0]]
             row.extend(format_rate(values[backend]) if backend in values else "—"
                        for backend in backends)
-            if "openssl" in backends and "libressl" in backends:
-                row.append(ratio_cell(values))
+            append_ratios(row, values, backends)
             table_rows.append(row)
         append_table(lines, headings, table_rows)
 
@@ -148,16 +167,14 @@ def render(rows, title):
         )
         headings = ["Cipher", "Bytes"]
         headings.extend(f"{display_backend(backend)} MiB/s" for backend in backends)
-        if "openssl" in backends and "libressl" in backends:
-            headings.append("OpenSSL / LibreSSL")
+        append_ratio_headings(headings, backends)
         table_rows = []
         for key in sorted(data):
             values = data[key]
             row = [key[0], str(key[1])]
             row.extend(format_rate(values[backend]) if backend in values else "—"
                        for backend in backends)
-            if "openssl" in backends and "libressl" in backends:
-                row.append(ratio_cell(values))
+            append_ratios(row, values, backends)
             table_rows.append(row)
         append_table(lines, headings, table_rows)
 

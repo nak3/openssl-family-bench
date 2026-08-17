@@ -111,17 +111,43 @@ ctest --test-dir build-libressl --output-on-failure
 Always use a different build directory for each backend. This prevents CMake's
 cached include and library paths from accidentally mixing OpenSSL and LibreSSL.
 
+#### Source and patch under test
+
+CI downloads the official LibreSSL Portable 4.3.2 release archive from
+`https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-4.3.2.tar.gz` and checks
+its pinned SHA-256 before building it. It does not build `lib/libssl` directly
+from the OpenBSD source tree.
+
+The workflow builds two copies from that same archive on the same runner:
+
+- `libressl`: unmodified 4.3.2 baseline
+- `libressl-patched`: 4.3.2 with
+  `patches/libressl/lazy-tls13-receive-buffer.patch` applied
+
+An OpenBSD tree patch normally names files below `lib/libssl/`; the corresponding
+LibreSSL Portable path is `ssl/`. Port the file paths and any platform-specific
+context before putting a patch in `patches/libressl/`. The workflow applies the
+patch with `patch -p1`, so a checked-in patch should use paths such as
+`a/ssl/tls13_record.c` and `b/ssl/tls13_record.c`.
+
+To test a different change, replace the checked-in patch, confirm that it applies
+to the pinned LibreSSL release, and push the branch or open a pull request. The
+Actions summary reports `Patched / baseline`; values above 1.0 are faster. Raw
+samples for both builds remain in the LibreSSL artifact.
+
 ### GitHub Actions
 
-The `Benchmark` workflow builds and tests OpenSSL and LibreSSL independently on
+The `Benchmark` workflow builds OpenSSL and both baseline and patched LibreSSL on
 Ubuntu. It then runs the complete AEAD and TLS 1.3 matrices with three 100 ms
-samples per case and uploads the raw JSON Lines files as workflow artifacts for 14 days.
+samples per case and uploads the raw JSON Lines files as workflow artifacts for
+14 days.
 The workflow runs for pushes, pull requests, and manual dispatches.
 
 Each backend job publishes a Markdown table to its GitHub Actions Job Summary.
-A final `OpenSSL vs LibreSSL summary` job shows median results side by side and
-the OpenSSL/LibreSSL ratio, so the common results can be inspected without
-downloading artifacts. The artifacts remain available for raw-sample analysis.
+A final `OpenSSL vs LibreSSL summary` job shows median results side by side,
+including the OpenSSL/baseline and patched/baseline ratios, so the common results
+can be inspected without downloading artifacts. The artifacts remain available
+for raw-sample analysis.
 
 GitHub-hosted runners are shared and their CPU performance varies between runs.
 Treat these artifacts as build/correctness evidence and exploratory benchmark

@@ -76,16 +76,16 @@ jobs:
           retention-days: 14
 
   libressl:
-    name: LibreSSL 4.3.2
+    name: LibreSSL 4.3.2 baseline and patched
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install --yes cmake ninja-build
+        run: sudo apt-get update && sudo apt-get install --yes cmake ninja-build patch
 
       - name: Download and verify LibreSSL
         working-directory: ${{ runner.temp }}
@@ -94,38 +94,77 @@ jobs:
             --output "libressl-${LIBRESSL_VERSION}.tar.gz" \
             "https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-${LIBRESSL_VERSION}.tar.gz"
           echo "${LIBRESSL_SHA256}  libressl-${LIBRESSL_VERSION}.tar.gz" | sha256sum --check --strict
-          tar --extract --gzip --file "libressl-${LIBRESSL_VERSION}.tar.gz"
+          mkdir libressl-baseline-source libressl-patched-source
+          tar --extract --gzip --file "libressl-${LIBRESSL_VERSION}.tar.gz" \
+            --strip-components=1 --directory libressl-baseline-source
+          tar --extract --gzip --file "libressl-${LIBRESSL_VERSION}.tar.gz" \
+            --strip-components=1 --directory libressl-patched-source
 
-      - name: Build LibreSSL
+      - name: Configure baseline LibreSSL
         run: >-
           cmake
-          -S "${RUNNER_TEMP}/libressl-${LIBRESSL_VERSION}"
-          -B "${RUNNER_TEMP}/libressl-build"
+          -S "${RUNNER_TEMP}/libressl-baseline-source"
+          -B "${RUNNER_TEMP}/libressl-baseline-build"
           -G Ninja
           -DCMAKE_BUILD_TYPE=Release
           -DLIBRESSL_APPS=OFF
           -DLIBRESSL_TESTS=OFF
-      - name: Compile LibreSSL
-        run: cmake --build "${RUNNER_TEMP}/libressl-build" --parallel
+      - name: Compile baseline LibreSSL
+        run: cmake --build "${RUNNER_TEMP}/libressl-baseline-build" --parallel
 
-      - name: Configure benchmark
+      - name: Configure baseline benchmark
         run: >-
           cmake -S . -B build-libressl -G Ninja
           -DCMAKE_BUILD_TYPE=Release
           -DOFB_BACKEND=LIBRESSL
-          -DLibreSSL_DIR="${RUNNER_TEMP}/libressl-build"
+          -DLibreSSL_DIR="${RUNNER_TEMP}/libressl-baseline-build"
 
-      - name: Build benchmark
+      - name: Build baseline benchmark
         run: cmake --build build-libressl --parallel
 
-      - name: Test
+      - name: Test baseline benchmark
         run: ctest --test-dir build-libressl --output-on-failure
+
+      - name: Apply LibreSSL patch under test
+        run: >-
+          patch -N -t -p1
+          -d "${RUNNER_TEMP}/libressl-patched-source"
+          -i "${GITHUB_WORKSPACE}/patches/libressl/lazy-tls13-receive-buffer.patch"
+
+      - name: Configure patched LibreSSL
+        run: >-
+          cmake
+          -S "${RUNNER_TEMP}/libressl-patched-source"
+          -B "${RUNNER_TEMP}/libressl-patched-build"
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DLIBRESSL_APPS=OFF
+          -DLIBRESSL_TESTS=OFF
+
+      - name: Compile patched LibreSSL
+        run: cmake --build "${RUNNER_TEMP}/libressl-patched-build" --parallel
+
+      - name: Configure patched benchmark
+        run: >-
+          cmake -S . -B build-libressl-patched -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DOFB_BACKEND=LIBRESSL
+          -DOFB_RESULT_BACKEND=libressl-patched
+          -DLibreSSL_DIR="${RUNNER_TEMP}/libressl-patched-build"
+
+      - name: Build patched benchmark
+        run: cmake --build build-libressl-patched --parallel
+
+      - name: Test patched benchmark
+        run: ctest --test-dir build-libressl-patched --output-on-failure
 
       - name: Run benchmark matrix
         run: |
           mkdir -p results
           ./build-libressl/ofb-libressl --samples 3 --sample-ms 100 > results/libressl.jsonl
           ./build-libressl/ofb-libressl-tls --samples 3 --sample-ms 100 > results/libressl-tls.jsonl
+          ./build-libressl-patched/ofb-libressl --samples 3 --sample-ms 100 > results/libressl-patched.jsonl
+          ./build-libressl-patched/ofb-libressl-tls --samples 3 --sample-ms 100 > results/libressl-patched-tls.jsonl
 
       - name: Validate result
         run: >-
@@ -136,7 +175,11 @@ jobs:
           tls_rows = [json.loads(line) for line in pathlib.Path("results/libressl-tls.jsonl").read_text().splitlines()];
           assert len(tls_rows) == 27;
           assert all(row["backend"] == "libressl" for row in tls_rows);
-          print(f"validated {len(rows)} primitive and {len(tls_rows)} TLS LibreSSL samples")'
+          patched = [json.loads(line) for line in pathlib.Path("results/libressl-patched.jsonl").read_text().splitlines()];
+          patched_tls = [json.loads(line) for line in pathlib.Path("results/libressl-patched-tls.jsonl").read_text().splitlines()];
+          assert len(patched) == 54 and len(patched_tls) == 27;
+          assert all(row["backend"] == "libressl-patched" for row in patched + patched_tls);
+          print(f"validated baseline and patched LibreSSL results")'
 
       - name: Publish LibreSSL job summary
         run: >-
@@ -151,6 +194,8 @@ jobs:
           path: |
             results/libressl.jsonl
             results/libressl-tls.jsonl
+            results/libressl-patched.jsonl
+            results/libressl-patched-tls.jsonl
           if-no-files-found: error
           retention-days: 14
 
