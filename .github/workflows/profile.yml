@@ -54,9 +54,11 @@ jobs:
             --output "openssl-${OPENSSL_VERSION}.tar.gz" \
             "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
           echo "${OPENSSL_SHA256}  openssl-${OPENSSL_VERSION}.tar.gz" | sha256sum --check --strict
-          mkdir openssl-profile-source
+          mkdir openssl-profile-source openssl-gprof-source
           tar --extract --gzip --file "openssl-${OPENSSL_VERSION}.tar.gz" \
             --strip-components=1 --directory openssl-profile-source
+          tar --extract --gzip --file "openssl-${OPENSSL_VERSION}.tar.gz" \
+            --strip-components=1 --directory openssl-gprof-source
 
           curl --fail --location --retry 3 \
             --output "libressl-${LIBRESSL_VERSION}.tar.gz" \
@@ -80,6 +82,20 @@ jobs:
           make --jobs "$(nproc)"
           make install_sw
 
+      - name: Build gprof-instrumented OpenSSL
+        working-directory: ${{ runner.temp }}/openssl-gprof-source
+        run: |
+          CFLAGS="-O3 -g -fno-omit-frame-pointer -fno-pie -pg" \
+          LDFLAGS="-no-pie -pg" \
+            ./Configure \
+              --prefix="${RUNNER_TEMP}/openssl-gprof-install" \
+              --libdir=lib \
+              no-shared \
+              no-tests \
+              no-docs
+          make --jobs "$(nproc)"
+          make install_sw
+
       - name: Build instrumented LibreSSL
         run: |
           cmake \
@@ -91,6 +107,18 @@ jobs:
             -DLIBRESSL_APPS=OFF \
             -DLIBRESSL_TESTS=OFF
           cmake --build "${RUNNER_TEMP}/libressl-profile-build" --parallel
+
+      - name: Build gprof-instrumented LibreSSL
+        run: |
+          cmake \
+            -S "${RUNNER_TEMP}/libressl-profile-source" \
+            -B "${RUNNER_TEMP}/libressl-gprof-build" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O3 -g -fno-omit-frame-pointer -fno-pie -pg -DNDEBUG" \
+            -DLIBRESSL_APPS=OFF \
+            -DLIBRESSL_TESTS=OFF
+          cmake --build "${RUNNER_TEMP}/libressl-gprof-build" --parallel
 
       - name: Apply LibreSSL patch under test
         run: >-
@@ -109,6 +137,18 @@ jobs:
             -DLIBRESSL_APPS=OFF \
             -DLIBRESSL_TESTS=OFF
           cmake --build "${RUNNER_TEMP}/libressl-patched-profile-build" --parallel
+
+      - name: Build gprof-instrumented patched LibreSSL
+        run: |
+          cmake \
+            -S "${RUNNER_TEMP}/libressl-patched-profile-source" \
+            -B "${RUNNER_TEMP}/libressl-patched-gprof-build" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O3 -g -fno-omit-frame-pointer -fno-pie -pg -DNDEBUG" \
+            -DLIBRESSL_APPS=OFF \
+            -DLIBRESSL_TESTS=OFF
+          cmake --build "${RUNNER_TEMP}/libressl-patched-gprof-build" --parallel
 
       - name: Build instrumented benchmark executables
         run: |
@@ -153,7 +193,7 @@ jobs:
             -DCMAKE_EXE_LINKER_FLAGS="-no-pie -pg" \
             -DOFB_BACKEND=OPENSSL \
             -DOFB_RESULT_ARCHITECTURE="${{ matrix.arch }}" \
-            -DOPENSSL_ROOT_DIR="${RUNNER_TEMP}/openssl-profile-install" \
+            -DOPENSSL_ROOT_DIR="${RUNNER_TEMP}/openssl-gprof-install" \
             -DOPENSSL_USE_STATIC_LIBS=TRUE
           cmake --build profile-build-openssl-gprof --parallel
 
@@ -163,7 +203,7 @@ jobs:
             -DCMAKE_EXE_LINKER_FLAGS="-no-pie -pg" \
             -DOFB_BACKEND=LIBRESSL \
             -DOFB_RESULT_ARCHITECTURE="${{ matrix.arch }}" \
-            -DLibreSSL_DIR="${RUNNER_TEMP}/libressl-profile-build"
+            -DLibreSSL_DIR="${RUNNER_TEMP}/libressl-gprof-build"
           cmake --build profile-build-libressl-gprof --parallel
 
           cmake -S . -B profile-build-libressl-patched-gprof -G Ninja \
@@ -173,8 +213,26 @@ jobs:
             -DOFB_BACKEND=LIBRESSL \
             -DOFB_RESULT_BACKEND=libressl-patched \
             -DOFB_RESULT_ARCHITECTURE="${{ matrix.arch }}" \
-            -DLibreSSL_DIR="${RUNNER_TEMP}/libressl-patched-profile-build"
+            -DLibreSSL_DIR="${RUNNER_TEMP}/libressl-patched-gprof-build"
           cmake --build profile-build-libressl-patched-gprof --parallel
+
+          for binary in \
+            profile-build-openssl-gprof/ofb-openssl \
+            profile-build-openssl-gprof/ofb-openssl-primitives \
+            profile-build-openssl-gprof/ofb-openssl-tls \
+            profile-build-libressl-gprof/ofb-libressl \
+            profile-build-libressl-gprof/ofb-libressl-primitives \
+            profile-build-libressl-gprof/ofb-libressl-tls \
+            profile-build-libressl-patched-gprof/ofb-libressl-tls; do
+            nm --undefined-only "${binary}" | grep -E '(_mcount|mcount|__fentry__)' >/dev/null
+          done
+
+          for library in \
+            "${RUNNER_TEMP}/openssl-gprof-install/lib/libcrypto.a" \
+            "${RUNNER_TEMP}/libressl-gprof-build/crypto/libcrypto.a" \
+            "${RUNNER_TEMP}/libressl-patched-gprof-build/crypto/libcrypto.a"; do
+            nm --undefined-only "${library}" | grep -E '(_mcount|mcount|__fentry__)' >/dev/null
+          done
 
       - name: Capture OpenSSL perf profiles
         env:
@@ -234,5 +292,12 @@ jobs:
           path: |
             profiles/
             profile-summary.md
+            profile-build-openssl-gprof/ofb-openssl
+            profile-build-openssl-gprof/ofb-openssl-primitives
+            profile-build-openssl-gprof/ofb-openssl-tls
+            profile-build-libressl-gprof/ofb-libressl
+            profile-build-libressl-gprof/ofb-libressl-primitives
+            profile-build-libressl-gprof/ofb-libressl-tls
+            profile-build-libressl-patched-gprof/ofb-libressl-tls
           if-no-files-found: error
           retention-days: 14

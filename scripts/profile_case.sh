@@ -62,6 +62,7 @@ sampling_path="${output_directory}/${stem}.sampling"
 data_path="${output_directory}/${stem}.perf.data"
 record_error_path="${output_directory}/${stem}.record.stderr.txt"
 report_path="${output_directory}/${stem}.report.txt"
+gprof_binary_info_path="${output_directory}/${stem}.gprof-binary.txt"
 
 # A successful perf invocation can still report <not supported>. Inspect the
 # result before selecting hardware counters so the summary never shows an
@@ -128,6 +129,10 @@ elif [[ ${GPROF_FALLBACK:-0} == 1 ]] && command -v gprof >/dev/null 2>&1; then
             gprof -b -p "${gprof_binary}" "${gmon_paths[0]}" \
                 > "${report_path}" 2>> "${record_error_path}"; then
             sampling_event="gprof"
+            {
+                printf 'binary=%s\n' "$(readlink -f "${gprof_binary}")"
+                sha256sum "${gprof_binary}"
+            } > "${gprof_binary_info_path}"
         fi
     fi
 fi

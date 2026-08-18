@@ -13,6 +13,9 @@ CASE_PATTERN = re.compile(
     r"(?P<operation>.+)__(?P<size>\d+)$"
 )
 HOTSPOT_PATTERN = re.compile(r"^\s*([0-9]+(?:\.[0-9]+)?)%\s+(.+?)\s*$")
+SUSPICIOUS_CHACHA_PREFIXES = (
+    "ASN1_", "CBS_", "CAST_", "Camellia_", "ERR_load_",
+)
 
 
 def parse_case(path):
@@ -39,8 +42,16 @@ def parse_stat(path):
             if len(row) < 3 or row[0].lstrip().startswith("#"):
                 continue
             value = parse_number(row[0])
+            unit = row[1].strip().lower()
             event = row[2].strip()
             if value is not None and event:
+                if event in {"task-clock", "cpu-clock"}:
+                    if unit in {"", "ns", "nanoseconds"}:
+                        value /= 1_000_000.0
+                    elif unit in {"us", "usec", "microseconds"}:
+                        value /= 1_000.0
+                    elif unit in {"s", "sec", "seconds"}:
+                        value *= 1_000.0
                 counters[event] = value
     return counters
 
@@ -80,6 +91,17 @@ def format_counter(value):
     return f"{value:,.2f}"
 
 
+def suspicious_chacha_symbols(case, profiler, hotspots):
+    if profiler != "gprof" or "CHACHA20" not in case["subject"]:
+        return []
+    if case["category"] == "tls" and case["operation"] == "handshake":
+        return []
+    return [
+        label for percent, label in hotspots
+        if percent >= 5.0 and label.startswith(SUSPICIOUS_CHACHA_PREFIXES)
+    ]
+
+
 def render_case(lines, stat_path):
     case = parse_case(stat_path)
     stem = stat_path.name[:-len(".stat.csv")]
@@ -94,6 +116,7 @@ def render_case(lines, stat_path):
     )
     counters = parse_stat(stat_path)
     hotspots = parse_hotspots(report_path, sampling)
+    suspicious_symbols = suspicious_chacha_symbols(case, sampling, hotspots)
 
     size_label = (
         "handshake"
@@ -111,6 +134,13 @@ def render_case(lines, stat_path):
         ),
         "",
     ])
+    if suspicious_symbols:
+        labels = ", ".join(f"`{escape(label)}`" for label in suspicious_symbols)
+        lines.extend([
+            f"> ⚠️ Possible gprof symbol misattribution: {labels}.",
+            "> Treat the percentage as unresolved ChaCha20 work until the raw profile is verified.",
+            "",
+        ])
 
     cycles = counters.get("cycles")
     instructions = counters.get("instructions")
