@@ -18,6 +18,7 @@ shift 7
 command=("$@")
 perf_binary=${PERF_BINARY:-perf}
 sample_repeat=${PROFILE_STAT_REPEAT:-2}
+gprof_binary=${GPROF_BINARY:-${command[0]}}
 
 for component in "${backend}" "${architecture}" "${category}" "${subject}" "${operation}"; do
     if [[ ! ${component} =~ ^[A-Za-z0-9._+-]+$ ]]; then
@@ -104,7 +105,6 @@ for candidate_event in cpu-clock task-clock cycles cpu-clock:u task-clock:u cycl
         break
     fi
 done
-printf '%s\n' "${sampling_event}" > "${sampling_path}"
 
 if [[ ${sampling_event} != unavailable ]]; then
     run_perf report \
@@ -113,10 +113,38 @@ if [[ ${sampling_event} != unavailable ]]; then
         --percent-limit 0.5 \
         --sort symbol,dso \
         --input "${data_path}" > "${report_path}"
-else
+elif [[ ${GPROF_FALLBACK:-0} == 1 ]] && command -v gprof >/dev/null 2>&1; then
+    gmon_prefix="${output_directory}/${stem}.gmon"
+    gprof_command=("${command[@]}")
+    gprof_command[0]="${gprof_binary}"
+    printf '%s\n' 'perf sampling unavailable; trying gprof fallback' \
+        >> "${record_error_path}"
+    if GMON_OUT_PREFIX="${gmon_prefix}" "${gprof_command[@]}" \
+        >/dev/null 2>> "${record_error_path}"; then
+        shopt -s nullglob
+        gmon_paths=("${gmon_prefix}".*)
+        shopt -u nullglob
+        if [[ ${#gmon_paths[@]} -gt 0 ]] &&
+            gprof -b -p "${gprof_binary}" "${gmon_paths[0]}" \
+                > "${report_path}" 2>> "${record_error_path}"; then
+            sampling_event="gprof"
+        fi
+    fi
+fi
+
+if [[ ${sampling_event} == unavailable ]]; then
     printf '%s\n' \
         'Sampling unavailable on this runner; perf stat counters remain valid.' \
         > "${report_path}"
+fi
+printf '%s\n' "${sampling_event}" > "${sampling_path}"
+
+if [[ ${sampling_event} == gprof ]]; then
+    for gmon_path in "${gmon_paths[@]}"; do
+        chmod 0644 "${gmon_path}"
+    done
+else
+    :
 fi
 
 run_privileged chmod 0644 "${stat_path}"

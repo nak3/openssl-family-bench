@@ -191,10 +191,14 @@ The Job Summary groups profiles by architecture, workload category, and backend,
 so profiles can be inspected without downloading an artifact. The corresponding
 artifact contains the CSV counters, full text reports, and
 `perf.data` recordings for local `perf report` or `perf annotate` analysis.
-Some virtual ARM PMUs support counting but not sampling interrupts. In that
-case the workflow keeps the `perf stat` counter visualization, marks hotspot
-sampling as unavailable, and preserves the attempted-event errors in the
-artifact instead of failing the job.
+Some hosted runner PMUs support counting but not sampling interrupts on either
+architecture. In that case the workflow keeps the `perf stat` counter
+visualization and automatically uses a separate `gprof`-instrumented executable
+for function-level hotspots. The attempted `perf` event errors and raw `gmon`
+data are preserved in the artifact.
+Because `gprof` and `perf` use different collection mechanisms, compare hotspot
+shapes within the same architecture/profiler rather than comparing their
+percentages directly.
 Profiling is opt-in because sampling and debug metadata can perturb timing; its
 numbers are intentionally kept separate from the regular benchmark summary.
 

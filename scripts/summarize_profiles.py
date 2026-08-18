@@ -45,13 +45,26 @@ def parse_stat(path):
     return counters
 
 
-def parse_hotspots(path, limit=10):
+def parse_hotspots(path, profiler, limit=10):
     hotspots = []
     with path.open(encoding="utf-8", errors="replace") as stream:
         for line in stream:
-            match = HOTSPOT_PATTERN.match(line)
-            if match is not None:
-                hotspots.append((float(match.group(1)), match.group(2)))
+            if profiler == "gprof":
+                fields = line.split()
+                if len(fields) < 4:
+                    continue
+                try:
+                    percent = float(fields[0])
+                    float(fields[1])
+                    float(fields[2])
+                except ValueError:
+                    continue
+                if percent > 0:
+                    hotspots.append((percent, fields[-1]))
+            else:
+                match = HOTSPOT_PATTERN.match(line)
+                if match is not None:
+                    hotspots.append((float(match.group(1)), match.group(2)))
     return hotspots[:limit]
 
 
@@ -80,7 +93,7 @@ def render_case(lines, stat_path):
         else "unknown"
     )
     counters = parse_stat(stat_path)
-    hotspots = parse_hotspots(report_path)
+    hotspots = parse_hotspots(report_path, sampling)
 
     size_label = (
         "handshake"
@@ -91,7 +104,11 @@ def render_case(lines, stat_path):
         f"##### {case['subject']} {case['operation']} — {size_label}",
         "",
         f"Counter mode: `{mode}`",
-        f"Sampling event: `{sampling}`",
+        (
+            "Profiler: `gprof` (PMU-independent fallback)"
+            if sampling == "gprof"
+            else f"Sampling event: `{sampling}`"
+        ),
         "",
     ])
 
@@ -151,7 +168,7 @@ def render(paths, title):
         f"# {title}",
         "",
         "> Profiles use separate instrumented builds and are not benchmark scores.",
-        "> Hotspots use the first supported sampling event; some hosted runner PMUs expose counters only.",
+        "> Hotspots use perf sampling when available and a PMU-independent gprof fallback otherwise.",
         "",
     ]
     for architecture in architectures:

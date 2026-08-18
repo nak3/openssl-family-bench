@@ -37,7 +37,7 @@ jobs:
       - name: Install build and profiling dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes build-essential cmake ninja-build patch perl linux-tools-common
+          sudo apt-get install --yes binutils build-essential cmake ninja-build patch perl linux-tools-common
           sudo apt-get install --yes "linux-tools-$(uname -r)" || sudo apt-get install --yes linux-tools-generic
           if ! perf --version; then
             perf_path=$(find /usr/lib/linux-tools -type f -name perf | sort -V | tail -n 1)
@@ -112,9 +112,11 @@ jobs:
 
       - name: Build instrumented benchmark executables
         run: |
+          benchmark_cflags="-O3 -g -fno-omit-frame-pointer -DNDEBUG"
+
           cmake -S . -B profile-build-openssl -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O3 -g -fno-omit-frame-pointer -DNDEBUG" \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="${benchmark_cflags}" \
             -DOFB_BACKEND=OPENSSL \
             -DOFB_RESULT_ARCHITECTURE="${{ matrix.arch }}" \
             -DOPENSSL_ROOT_DIR="${RUNNER_TEMP}/openssl-profile-install" \
@@ -124,7 +126,7 @@ jobs:
 
           cmake -S . -B profile-build-libressl -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O3 -g -fno-omit-frame-pointer -DNDEBUG" \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="${benchmark_cflags}" \
             -DOFB_BACKEND=LIBRESSL \
             -DOFB_RESULT_ARCHITECTURE="${{ matrix.arch }}" \
             -DLibreSSL_DIR="${RUNNER_TEMP}/libressl-profile-build"
@@ -133,7 +135,7 @@ jobs:
 
           cmake -S . -B profile-build-libressl-patched -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O3 -g -fno-omit-frame-pointer -DNDEBUG" \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="${benchmark_cflags}" \
             -DOFB_BACKEND=LIBRESSL \
             -DOFB_RESULT_BACKEND=libressl-patched \
             -DOFB_RESULT_ARCHITECTURE="${{ matrix.arch }}" \
@@ -141,27 +143,73 @@ jobs:
           cmake --build profile-build-libressl-patched --parallel
           ctest --test-dir profile-build-libressl-patched --output-on-failure
 
-      - name: Capture OpenSSL perf profiles
+      - name: Build PMU-independent fallback executables
         run: |
-          scripts/profile_aead.sh openssl "${{ matrix.arch }}" \
+          gprof_cflags="-O3 -g -fno-omit-frame-pointer -fno-pie -pg -DNDEBUG"
+
+          cmake -S . -B profile-build-openssl-gprof -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="${gprof_cflags}" \
+            -DCMAKE_EXE_LINKER_FLAGS="-no-pie -pg" \
+            -DOFB_BACKEND=OPENSSL \
+            -DOFB_RESULT_ARCHITECTURE="${{ matrix.arch }}" \
+            -DOPENSSL_ROOT_DIR="${RUNNER_TEMP}/openssl-profile-install" \
+            -DOPENSSL_USE_STATIC_LIBS=TRUE
+          cmake --build profile-build-openssl-gprof --parallel
+
+          cmake -S . -B profile-build-libressl-gprof -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="${gprof_cflags}" \
+            -DCMAKE_EXE_LINKER_FLAGS="-no-pie -pg" \
+            -DOFB_BACKEND=LIBRESSL \
+            -DOFB_RESULT_ARCHITECTURE="${{ matrix.arch }}" \
+            -DLibreSSL_DIR="${RUNNER_TEMP}/libressl-profile-build"
+          cmake --build profile-build-libressl-gprof --parallel
+
+          cmake -S . -B profile-build-libressl-patched-gprof -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="${gprof_cflags}" \
+            -DCMAKE_EXE_LINKER_FLAGS="-no-pie -pg" \
+            -DOFB_BACKEND=LIBRESSL \
+            -DOFB_RESULT_BACKEND=libressl-patched \
+            -DOFB_RESULT_ARCHITECTURE="${{ matrix.arch }}" \
+            -DLibreSSL_DIR="${RUNNER_TEMP}/libressl-patched-profile-build"
+          cmake --build profile-build-libressl-patched-gprof --parallel
+
+      - name: Capture OpenSSL perf profiles
+        env:
+          GPROF_FALLBACK: 1
+        run: |
+          GPROF_BINARY=./profile-build-openssl-gprof/ofb-openssl \
+            scripts/profile_aead.sh openssl "${{ matrix.arch }}" \
             ./profile-build-openssl/ofb-openssl profiles
-          scripts/profile_primitives.sh openssl "${{ matrix.arch }}" \
+          GPROF_BINARY=./profile-build-openssl-gprof/ofb-openssl-primitives \
+            scripts/profile_primitives.sh openssl "${{ matrix.arch }}" \
             ./profile-build-openssl/ofb-openssl-primitives profiles
-          scripts/profile_tls.sh openssl "${{ matrix.arch }}" \
+          GPROF_BINARY=./profile-build-openssl-gprof/ofb-openssl-tls \
+            scripts/profile_tls.sh openssl "${{ matrix.arch }}" \
             ./profile-build-openssl/ofb-openssl-tls profiles
 
       - name: Capture LibreSSL perf profiles
+        env:
+          GPROF_FALLBACK: 1
         run: |
-          scripts/profile_aead.sh libressl "${{ matrix.arch }}" \
+          GPROF_BINARY=./profile-build-libressl-gprof/ofb-libressl \
+            scripts/profile_aead.sh libressl "${{ matrix.arch }}" \
             ./profile-build-libressl/ofb-libressl profiles
-          scripts/profile_primitives.sh libressl "${{ matrix.arch }}" \
+          GPROF_BINARY=./profile-build-libressl-gprof/ofb-libressl-primitives \
+            scripts/profile_primitives.sh libressl "${{ matrix.arch }}" \
             ./profile-build-libressl/ofb-libressl-primitives profiles
-          scripts/profile_tls.sh libressl "${{ matrix.arch }}" \
+          GPROF_BINARY=./profile-build-libressl-gprof/ofb-libressl-tls \
+            scripts/profile_tls.sh libressl "${{ matrix.arch }}" \
             ./profile-build-libressl/ofb-libressl-tls profiles
 
       - name: Capture patched LibreSSL TLS perf profiles
+        env:
+          GPROF_FALLBACK: 1
         run: |
-          scripts/profile_tls.sh libressl-patched "${{ matrix.arch }}" \
+          GPROF_BINARY=./profile-build-libressl-patched-gprof/ofb-libressl-tls \
+            scripts/profile_tls.sh libressl-patched "${{ matrix.arch }}" \
             ./profile-build-libressl-patched/ofb-libressl-tls profiles
 
       - name: Publish profile visualization
