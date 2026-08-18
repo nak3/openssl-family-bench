@@ -178,6 +178,10 @@ Each profiling Job Summary contains the runner CPU description, available
 hardware or software counters, and text bar charts for the hottest symbols.
 The corresponding artifact contains the CSV counters, full text reports, and
 `perf.data` recordings for local `perf report` or `perf annotate` analysis.
+Some virtual ARM PMUs support counting but not sampling interrupts. In that
+case the workflow keeps the `perf stat` counter visualization, marks hotspot
+sampling as unavailable, and preserves the attempted-event errors in the
+artifact instead of failing the job.
 Profiling is opt-in because sampling and debug metadata can perturb timing; its
 numbers are intentionally kept separate from the regular benchmark summary.
 

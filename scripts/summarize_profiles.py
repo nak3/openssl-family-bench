@@ -70,8 +70,14 @@ def render_case(lines, stat_path):
     case = parse_case(stat_path)
     stem = stat_path.name[:-len(".stat.csv")]
     mode_path = stat_path.with_name(stem + ".mode")
+    sampling_path = stat_path.with_name(stem + ".sampling")
     report_path = stat_path.with_name(stem + ".report.txt")
     mode = mode_path.read_text(encoding="utf-8").strip()
+    sampling = (
+        sampling_path.read_text(encoding="utf-8").strip()
+        if sampling_path.exists()
+        else "unknown"
+    )
     counters = parse_stat(stat_path)
     hotspots = parse_hotspots(report_path)
 
@@ -79,6 +85,7 @@ def render_case(lines, stat_path):
         f"#### {case['algorithm'].upper()} {case['operation']} — {case['size']} bytes",
         "",
         f"Counter mode: `{mode}`",
+        f"Sampling event: `{sampling}`",
         "",
     ])
 
@@ -107,7 +114,10 @@ def render_case(lines, stat_path):
             blocks = "█" * max(1, min(20, math.ceil(percent / 5.0)))
             lines.append(f"| `{blocks:<20}` {percent:5.1f}% | `{escape(label)}` |")
     else:
-        lines.append("| — | No samples reported |")
+        if sampling == "unavailable":
+            lines.append("| — | Sampling is not supported by this runner PMU |")
+        else:
+            lines.append("| — | No samples reported |")
     lines.append("")
 
 
@@ -129,7 +139,7 @@ def render(paths, title):
         f"# {title}",
         "",
         "> Profiles use a separate instrumented build and are not benchmark scores.",
-        "> Hotspot percentages are sampled with the software `cpu-clock` event.",
+        "> Hotspots use the first supported sampling event; some virtual ARM PMUs expose counters only.",
         "",
     ]
     for architecture in architectures:
