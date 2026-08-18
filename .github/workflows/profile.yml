@@ -85,8 +85,10 @@ jobs:
       - name: Build gprof-instrumented OpenSSL
         working-directory: ${{ runner.temp }}/openssl-gprof-source
         run: |
+          # OpenSSL still links provider DSOs with no-shared. Do not put
+          # -no-pie in the global LDFLAGS because it conflicts with -shared.
           CFLAGS="-O3 -g -fno-omit-frame-pointer -fno-pie -pg" \
-          LDFLAGS="-no-pie -pg" \
+          LDFLAGS="-pg" \
             ./Configure \
               --prefix="${RUNNER_TEMP}/openssl-gprof-install" \
               --libdir=lib \
