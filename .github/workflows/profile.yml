@@ -1,4 +1,4 @@
-name: AEAD Profile
+name: Crypto Profile
 
 on:
   workflow_dispatch:
@@ -18,7 +18,7 @@ env:
 
 jobs:
   profile:
-    name: AEAD perf profile (${{ matrix.arch }})
+    name: Crypto perf profile (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -62,9 +62,11 @@ jobs:
             --output "libressl-${LIBRESSL_VERSION}.tar.gz" \
             "https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-${LIBRESSL_VERSION}.tar.gz"
           echo "${LIBRESSL_SHA256}  libressl-${LIBRESSL_VERSION}.tar.gz" | sha256sum --check --strict
-          mkdir libressl-profile-source
+          mkdir libressl-profile-source libressl-patched-profile-source
           tar --extract --gzip --file "libressl-${LIBRESSL_VERSION}.tar.gz" \
             --strip-components=1 --directory libressl-profile-source
+          tar --extract --gzip --file "libressl-${LIBRESSL_VERSION}.tar.gz" \
+            --strip-components=1 --directory libressl-patched-profile-source
 
       - name: Build instrumented OpenSSL
         working-directory: ${{ runner.temp }}/openssl-profile-source
@@ -90,6 +92,24 @@ jobs:
             -DLIBRESSL_TESTS=OFF
           cmake --build "${RUNNER_TEMP}/libressl-profile-build" --parallel
 
+      - name: Apply LibreSSL patch under test
+        run: >-
+          patch -N -t -p1
+          -d "${RUNNER_TEMP}/libressl-patched-profile-source"
+          -i "${GITHUB_WORKSPACE}/patches/libressl/lazy-tls13-receive-buffer.patch"
+
+      - name: Build instrumented patched LibreSSL
+        run: |
+          cmake \
+            -S "${RUNNER_TEMP}/libressl-patched-profile-source" \
+            -B "${RUNNER_TEMP}/libressl-patched-profile-build" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O3 -g -fno-omit-frame-pointer -DNDEBUG" \
+            -DLIBRESSL_APPS=OFF \
+            -DLIBRESSL_TESTS=OFF
+          cmake --build "${RUNNER_TEMP}/libressl-patched-profile-build" --parallel
+
       - name: Build instrumented benchmark executables
         run: |
           cmake -S . -B profile-build-openssl -G Ninja \
@@ -111,17 +131,43 @@ jobs:
           cmake --build profile-build-libressl --parallel
           ctest --test-dir profile-build-libressl --output-on-failure
 
-      - name: Capture perf profiles
+          cmake -S . -B profile-build-libressl-patched -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O3 -g -fno-omit-frame-pointer -DNDEBUG" \
+            -DOFB_BACKEND=LIBRESSL \
+            -DOFB_RESULT_BACKEND=libressl-patched \
+            -DOFB_RESULT_ARCHITECTURE="${{ matrix.arch }}" \
+            -DLibreSSL_DIR="${RUNNER_TEMP}/libressl-patched-profile-build"
+          cmake --build profile-build-libressl-patched --parallel
+          ctest --test-dir profile-build-libressl-patched --output-on-failure
+
+      - name: Capture OpenSSL perf profiles
         run: |
           scripts/profile_aead.sh openssl "${{ matrix.arch }}" \
             ./profile-build-openssl/ofb-openssl profiles
+          scripts/profile_primitives.sh openssl "${{ matrix.arch }}" \
+            ./profile-build-openssl/ofb-openssl-primitives profiles
+          scripts/profile_tls.sh openssl "${{ matrix.arch }}" \
+            ./profile-build-openssl/ofb-openssl-tls profiles
+
+      - name: Capture LibreSSL perf profiles
+        run: |
           scripts/profile_aead.sh libressl "${{ matrix.arch }}" \
             ./profile-build-libressl/ofb-libressl profiles
+          scripts/profile_primitives.sh libressl "${{ matrix.arch }}" \
+            ./profile-build-libressl/ofb-libressl-primitives profiles
+          scripts/profile_tls.sh libressl "${{ matrix.arch }}" \
+            ./profile-build-libressl/ofb-libressl-tls profiles
+
+      - name: Capture patched LibreSSL TLS perf profiles
+        run: |
+          scripts/profile_tls.sh libressl-patched "${{ matrix.arch }}" \
+            ./profile-build-libressl-patched/ofb-libressl-tls profiles
 
       - name: Publish profile visualization
         run: |
           python3 scripts/summarize_profiles.py profiles \
-            --title "AEAD perf profiles (${{ matrix.arch }})" \
+            --title "Crypto perf profiles (${{ matrix.arch }})" \
             --output profile-summary.md
           {
             echo '## Runner CPU'
@@ -136,7 +182,7 @@ jobs:
       - name: Upload perf profiles
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: perf-aead-${{ matrix.arch }}-${{ github.sha }}
+          name: perf-crypto-${{ matrix.arch }}-${{ github.sha }}
           path: |
             profiles/
             profile-summary.md

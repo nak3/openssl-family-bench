@@ -168,15 +168,28 @@ self-hosted runner when reproducible performance comparisons are required.
 
 #### perf profiling
 
-Use **Run workflow** on the dedicated `AEAD Profile` workflow to start separate
-x86_64 and ARM64 profiling jobs. These jobs build OpenSSL and baseline LibreSSL
-with `-O3`, debug symbols, and frame pointers, then profile AES-128-GCM seal/open
-operations at 64 and 16384 bytes. The regular `Benchmark` workflow does not show
-skipped profiling placeholders on pushes or pull requests.
+Use **Run workflow** on the dedicated `Crypto Profile` workflow to start separate
+x86_64 and ARM64 profiling jobs. The workflow must exist on the repository's
+default branch before GitHub exposes its **Run workflow** button; after that,
+the branch selector can run it against `dev`. These jobs build OpenSSL, baseline
+LibreSSL, and the patched LibreSSL with `-O3`, debug symbols, and frame pointers.
+
+The profile matrix covers:
+
+- all AEAD workloads: AES-128-GCM, AES-256-GCM, and ChaCha20-Poly1305;
+- AES-128/256-CBC encrypt/decrypt, SHA-256/512, and HMAC-SHA256;
+- TLS 1.3 handshake and transfer for all three supported cipher suites;
+- patched LibreSSL TLS workloads, where the record-buffer patch can affect the
+  call profile directly.
+
+The regular `Benchmark` workflow remains separate and does not show skipped
+profiling placeholders on pushes or pull requests.
 
 Each profiling Job Summary contains the runner CPU description, available
 hardware or software counters, and text bar charts for the hottest symbols.
-The corresponding artifact contains the CSV counters, full text reports, and
+The Job Summary groups profiles by architecture, workload category, and backend,
+so profiles can be inspected without downloading an artifact. The corresponding
+artifact contains the CSV counters, full text reports, and
 `perf.data` recordings for local `perf report` or `perf annotate` analysis.
 Some virtual ARM PMUs support counting but not sampling interrupts. In that
 case the workflow keeps the `perf stat` counter visualization, marks hotspot

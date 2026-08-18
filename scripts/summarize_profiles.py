@@ -9,7 +9,8 @@ import re
 
 CASE_PATTERN = re.compile(
     r"^(?P<backend>.+)__(?P<architecture>.+)__"
-    r"(?P<algorithm>.+)__(?P<operation>seal|open)__(?P<size>\d+)$"
+    r"(?P<category>.+)__(?P<subject>.+)__"
+    r"(?P<operation>.+)__(?P<size>\d+)$"
 )
 HOTSPOT_PATTERN = re.compile(r"^\s*([0-9]+(?:\.[0-9]+)?)%\s+(.+?)\s*$")
 
@@ -81,8 +82,13 @@ def render_case(lines, stat_path):
     counters = parse_stat(stat_path)
     hotspots = parse_hotspots(report_path)
 
+    size_label = (
+        "handshake"
+        if case["category"] == "tls" and case["operation"] == "handshake"
+        else f"{case['size']} bytes"
+    )
     lines.extend([
-        f"#### {case['algorithm'].upper()} {case['operation']} — {case['size']} bytes",
+        f"##### {case['subject']} {case['operation']} — {size_label}",
         "",
         f"Counter mode: `{mode}`",
         f"Sampling event: `{sampling}`",
@@ -105,7 +111,13 @@ def render_case(lines, stat_path):
     ]
     counter_rows = [(name, value) for name, value in counter_rows if value is not None]
     lines.extend(["| Counter | Value |", "| --- | ---: |"])
-    lines.extend(f"| {name} | {format_counter(value)} |" for name, value in counter_rows)
+    if counter_rows:
+        lines.extend(
+            f"| {name} | {format_counter(value)} |"
+            for name, value in counter_rows
+        )
+    else:
+        lines.append("| Status | perf returned no usable counters |")
     lines.append("")
 
     lines.extend(["| Hotspot share | Symbol / object |", "| --- | --- |"])
@@ -138,25 +150,36 @@ def render(paths, title):
     lines = [
         f"# {title}",
         "",
-        "> Profiles use a separate instrumented build and are not benchmark scores.",
-        "> Hotspots use the first supported sampling event; some virtual ARM PMUs expose counters only.",
+        "> Profiles use separate instrumented builds and are not benchmark scores.",
+        "> Hotspots use the first supported sampling event; some hosted runner PMUs expose counters only.",
         "",
     ]
     for architecture in architectures:
         lines.extend([f"## Architecture: `{architecture}`", ""])
-        backends = sorted({
-            case["backend"] for case, _ in cases
+        categories = sorted({
+            case["category"] for case, _ in cases
             if case["architecture"] == architecture
-        })
-        for backend in backends:
-            lines.extend([f"### Backend: `{backend}`", ""])
-            selected = [
-                (case, path) for case, path in cases
-                if case["architecture"] == architecture and case["backend"] == backend
-            ]
-            selected.sort(key=lambda item: (item[0]["operation"], item[0]["size"]))
-            for _, path in selected:
-                render_case(lines, path)
+        }, key=lambda name: ({"aead": 0, "primitive": 1, "tls": 2}.get(name, 99), name))
+        for category in categories:
+            lines.extend([f"### Category: `{category.upper()}`", ""])
+            backends = sorted({
+                case["backend"] for case, _ in cases
+                if case["architecture"] == architecture
+                and case["category"] == category
+            })
+            for backend in backends:
+                lines.extend([f"#### Backend: `{backend}`", ""])
+                selected = [
+                    (case, path) for case, path in cases
+                    if case["architecture"] == architecture
+                    and case["category"] == category
+                    and case["backend"] == backend
+                ]
+                selected.sort(key=lambda item: (
+                    item[0]["subject"], item[0]["operation"], item[0]["size"]
+                ))
+                for _, path in selected:
+                    render_case(lines, path)
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -164,7 +187,7 @@ def main():
     parser = argparse.ArgumentParser(description="Render perf profiles as Markdown")
     parser.add_argument("paths", nargs="+", help="profile files or directories")
     parser.add_argument("--output", help="write Markdown to this file")
-    parser.add_argument("--title", default="AEAD perf profiles")
+    parser.add_argument("--title", default="Crypto perf profiles")
     args = parser.parse_args()
     markdown = render(args.paths, args.title)
     if args.output:

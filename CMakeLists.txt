@@ -12,6 +12,7 @@ if(OFB_BACKEND_UPPER STREQUAL "OPENSSL")
     find_package(OpenSSL REQUIRED COMPONENTS SSL Crypto)
     set(OFB_TARGET ofb-openssl)
     set(OFB_TLS_TARGET ofb-openssl-tls)
+    set(OFB_PRIMITIVE_TARGET ofb-openssl-primitives)
     set(OFB_CRYPTO_TARGET OpenSSL::Crypto)
     set(OFB_SSL_TARGET OpenSSL::SSL)
     set(OFB_BACKEND_NAME openssl)
@@ -19,6 +20,7 @@ elseif(OFB_BACKEND_UPPER STREQUAL "LIBRESSL")
     find_package(LibreSSL CONFIG REQUIRED COMPONENTS SSL Crypto)
     set(OFB_TARGET ofb-libressl)
     set(OFB_TLS_TARGET ofb-libressl-tls)
+    set(OFB_PRIMITIVE_TARGET ofb-libressl-primitives)
     set(OFB_CRYPTO_TARGET LibreSSL::Crypto)
     set(OFB_SSL_TARGET LibreSSL::SSL)
     set(OFB_BACKEND_NAME libressl)
@@ -44,6 +46,11 @@ add_executable(${OFB_TLS_TARGET}
     backends/openssl_tls.c
 )
 
+add_executable(${OFB_PRIMITIVE_TARGET}
+    src/primitive_main.c
+    src/timer.c
+)
+
 target_include_directories(${OFB_TARGET} PRIVATE include)
 target_link_libraries(${OFB_TARGET} PRIVATE ${OFB_CRYPTO_TARGET})
 target_compile_features(${OFB_TARGET} PRIVATE c_std_11)
@@ -65,12 +72,22 @@ target_compile_definitions(${OFB_TLS_TARGET} PRIVATE
     OFB_DEFAULT_KEY_PATH="${CMAKE_CURRENT_SOURCE_DIR}/testdata/server-key.pem"
 )
 
+target_include_directories(${OFB_PRIMITIVE_TARGET} PRIVATE include)
+target_link_libraries(${OFB_PRIMITIVE_TARGET} PRIVATE ${OFB_CRYPTO_TARGET})
+target_compile_features(${OFB_PRIMITIVE_TARGET} PRIVATE c_std_11)
+target_compile_definitions(${OFB_PRIMITIVE_TARGET} PRIVATE
+    OFB_BACKEND_NAME="${OFB_RESULT_BACKEND}"
+    OFB_ARCHITECTURE="${OFB_RESULT_ARCHITECTURE}"
+)
+
 if(MSVC)
     target_compile_options(${OFB_TARGET} PRIVATE /W4)
     target_compile_options(${OFB_TLS_TARGET} PRIVATE /W4)
+    target_compile_options(${OFB_PRIMITIVE_TARGET} PRIVATE /W4)
 else()
     target_compile_options(${OFB_TARGET} PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(${OFB_TLS_TARGET} PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(${OFB_PRIMITIVE_TARGET} PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 if(BUILD_TESTING)
@@ -101,5 +118,32 @@ if(BUILD_TESTING)
     )
     set_tests_properties(smoke-tls13-transfer PROPERTIES
         PASS_REGULAR_EXPRESSION "\"benchmark\":\"tls-transfer\""
+    )
+
+    add_test(
+        NAME smoke-sha-256
+        COMMAND ${OFB_PRIMITIVE_TARGET} --primitive SHA-256 --operation digest
+                --size 64 --sample-ms 10
+    )
+    set_tests_properties(smoke-sha-256 PROPERTIES
+        PASS_REGULAR_EXPRESSION "\"primitive\":\"SHA-256\""
+    )
+
+    add_test(
+        NAME smoke-aes-128-cbc
+        COMMAND ${OFB_PRIMITIVE_TARGET} --primitive AES-128-CBC
+                --operation encrypt --size 64 --sample-ms 10
+    )
+    set_tests_properties(smoke-aes-128-cbc PROPERTIES
+        PASS_REGULAR_EXPRESSION "\"primitive\":\"AES-128-CBC\""
+    )
+
+    add_test(
+        NAME smoke-hmac-sha256
+        COMMAND ${OFB_PRIMITIVE_TARGET} --primitive HMAC-SHA256
+                --operation mac --size 63 --sample-ms 10
+    )
+    set_tests_properties(smoke-hmac-sha256 PROPERTIES
+        PASS_REGULAR_EXPRESSION "\"primitive\":\"HMAC-SHA256\""
     )
 endif()
