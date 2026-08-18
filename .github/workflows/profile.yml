@@ -85,9 +85,11 @@ jobs:
       - name: Build gprof-instrumented OpenSSL
         working-directory: ${{ runner.temp }}/openssl-gprof-source
         run: |
-          # OpenSSL still links provider DSOs with no-shared. Do not put
-          # -no-pie in the global LDFLAGS because it conflicts with -shared.
-          CFLAGS="-O3 -g -fno-omit-frame-pointer -fno-pie -pg" \
+          # OpenSSL still links provider DSOs with no-shared. Keep both
+          # -fno-pie and -no-pie out of this global build: -fno-pie overrides
+          # the provider's -fPIC on AArch64, while -no-pie conflicts with
+          # -shared. The final benchmark executable is linked as non-PIE below.
+          CFLAGS="-O3 -g -fno-omit-frame-pointer -pg" \
           LDFLAGS="-pg" \
             ./Configure \
               --prefix="${RUNNER_TEMP}/openssl-gprof-install" \
