@@ -200,8 +200,11 @@ does not receive compiler-inserted `gprof` call hooks.
 The attempted `perf` event errors, raw `gmon` data, exact fallback executables,
 and executable SHA-256 digests are preserved in the artifact. The workflow
 checks for profiling hooks in both the executables and `libcrypto.a` before it
-runs any profiles. Implausible ChaCha20 symbols are flagged as possible gprof
-symbol misattribution instead of being presented without qualification.
+runs any profiles. It also supplies `gprof` with an external `nm` symbol table
+so optimized local functions such as GCC's `*.part.N` clones are not attributed
+to the preceding global symbol. Implausible ChaCha20 symbols are still flagged
+as possible gprof symbol misattribution instead of being presented without
+qualification.
 Because `gprof` and `perf` use different collection mechanisms, compare hotspot
 shapes within the same architecture/profiler rather than comparing their
 percentages directly.

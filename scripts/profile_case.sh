@@ -63,6 +63,7 @@ data_path="${output_directory}/${stem}.perf.data"
 record_error_path="${output_directory}/${stem}.record.stderr.txt"
 report_path="${output_directory}/${stem}.report.txt"
 gprof_binary_info_path="${output_directory}/${stem}.gprof-binary.txt"
+gprof_symbol_table_path="${output_directory}/${stem}.gprof-symbols.txt"
 
 # A successful perf invocation can still report <not supported>. Inspect the
 # result before selecting hardware counters so the summary never shows an
@@ -125,8 +126,18 @@ elif [[ ${GPROF_FALLBACK:-0} == 1 ]] && command -v gprof >/dev/null 2>&1; then
         shopt -s nullglob
         gmon_paths=("${gmon_prefix}".*)
         shopt -u nullglob
-        if [[ ${#gmon_paths[@]} -gt 0 ]] &&
-            gprof -b -p "${gprof_binary}" "${gmon_paths[0]}" \
+        # gprof rejects some GCC-generated local names such as *.part.N and
+        # attributes their samples to the preceding accepted symbol. Supplying
+        # an external nm table preserves those optimized function boundaries.
+        if nm --defined-only --numeric-sort "${gprof_binary}" | \
+            awk 'NF >= 3 && $2 ~ /^[tTwW]$/ {
+                kind = ($2 ~ /^[TW]$/) ? "T" : "t"
+                print $1, kind, $3
+            }' > "${gprof_symbol_table_path}" &&
+            [[ -s ${gprof_symbol_table_path} ]] &&
+            [[ ${#gmon_paths[@]} -gt 0 ]] &&
+            gprof -b -p -S "${gprof_symbol_table_path}" \
+                "${gprof_binary}" "${gmon_paths[0]}" \
                 > "${report_path}" 2>> "${record_error_path}"; then
             sampling_event="gprof"
             {
