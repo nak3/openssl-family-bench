@@ -14,8 +14,7 @@ concurrency:
 env:
   OPENSSL_VERSION: 3.5.7
   OPENSSL_SHA256: a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8
-  LIBRESSL_VERSION: 4.3.2
-  LIBRESSL_SHA256: edf01aee24c65d69e6a9efcb9d44bcda682ff9d4f3bbbd95e794e1dfa90847b5
+  LIBRESSL_REF: master
 
 jobs:
   profile:
@@ -38,7 +37,7 @@ jobs:
       - name: Install build and profiling dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes binutils build-essential cmake ninja-build patch perl linux-tools-common
+          sudo apt-get install --yes autoconf automake binutils build-essential cmake git libtool ninja-build patch perl linux-tools-common
           sudo apt-get install --yes "linux-tools-$(uname -r)" || sudo apt-get install --yes linux-tools-generic
           if ! perf --version; then
             perf_path=$(find /usr/lib/linux-tools -type f -name perf | sort -V | tail -n 1)
@@ -48,7 +47,7 @@ jobs:
           perf --version
           sudo sysctl -w kernel.perf_event_paranoid=-1 || true
 
-      - name: Download and verify source archives
+      - name: Download and verify OpenSSL source archive
         working-directory: ${{ runner.temp }}
         run: |
           curl --fail --location --retry 3 \
@@ -61,15 +60,15 @@ jobs:
           tar --extract --gzip --file "openssl-${OPENSSL_VERSION}.tar.gz" \
             --strip-components=1 --directory openssl-gprof-source
 
-          curl --fail --location --retry 3 \
-            --output "libressl-${LIBRESSL_VERSION}.tar.gz" \
-            "https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-${LIBRESSL_VERSION}.tar.gz"
-          echo "${LIBRESSL_SHA256}  libressl-${LIBRESSL_VERSION}.tar.gz" | sha256sum --check --strict
-          mkdir libressl-profile-source libressl-patched-profile-source
-          tar --extract --gzip --file "libressl-${LIBRESSL_VERSION}.tar.gz" \
-            --strip-components=1 --directory libressl-profile-source
-          tar --extract --gzip --file "libressl-${LIBRESSL_VERSION}.tar.gz" \
-            --strip-components=1 --directory libressl-patched-profile-source
+      - name: Prepare LibreSSL from the OpenBSD development branch
+        run: |
+          git clone --depth 1 --branch "${LIBRESSL_REF}" \
+            https://github.com/libressl/portable.git \
+            "${RUNNER_TEMP}/libressl-profile-source"
+          cd "${RUNNER_TEMP}/libressl-profile-source"
+          ./autogen.sh
+          echo "LIBRESSL_PORTABLE_COMMIT=$(git rev-parse HEAD)" >> "${GITHUB_ENV}"
+          echo "LIBRESSL_OPENBSD_COMMIT=$(git -C openbsd rev-parse HEAD)" >> "${GITHUB_ENV}"
 
       - name: Build instrumented OpenSSL
         working-directory: ${{ runner.temp }}/openssl-profile-source
@@ -128,13 +127,13 @@ jobs:
       - name: Apply LibreSSL patch under test
         run: >-
           patch -N -t -p1
-          -d "${RUNNER_TEMP}/libressl-patched-profile-source"
+          -d "${RUNNER_TEMP}/libressl-profile-source"
           -i "${GITHUB_WORKSPACE}/patches/libressl/lazy-tls13-receive-buffer.patch"
 
       - name: Build instrumented patched LibreSSL
         run: |
           cmake \
-            -S "${RUNNER_TEMP}/libressl-patched-profile-source" \
+            -S "${RUNNER_TEMP}/libressl-profile-source" \
             -B "${RUNNER_TEMP}/libressl-patched-profile-build" \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -146,7 +145,7 @@ jobs:
       - name: Build gprof-instrumented patched LibreSSL
         run: |
           cmake \
-            -S "${RUNNER_TEMP}/libressl-patched-profile-source" \
+            -S "${RUNNER_TEMP}/libressl-profile-source" \
             -B "${RUNNER_TEMP}/libressl-patched-gprof-build" \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -281,6 +280,10 @@ jobs:
             --title "Crypto perf profiles (${{ matrix.arch }})" \
             --output profile-summary.md
           {
+            echo "LibreSSL Portable commit: \`${LIBRESSL_PORTABLE_COMMIT}\`"
+            echo
+            echo "OpenBSD source commit: \`${LIBRESSL_OPENBSD_COMMIT}\`"
+            echo
             echo '## Runner CPU'
             echo
             echo '```text'

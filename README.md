@@ -113,15 +113,17 @@ cached include and library paths from accidentally mixing OpenSSL and LibreSSL.
 
 #### Source and patch under test
 
-CI downloads the official LibreSSL Portable 4.3.2 release archive from
-`https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-4.3.2.tar.gz` and checks
-its pinned SHA-256 before building it. It does not build `lib/libssl` directly
-from the OpenBSD source tree.
+CI checks out the official LibreSSL Portable `master` branch and runs its
+`autogen.sh`. That script synchronizes the current OpenBSD `master` sources and
+generates the portable source tree needed by the Linux runners. The workflow
+records both the LibreSSL Portable and OpenBSD source commit IDs in the job
+summary so a run can be reproduced even though the branches move.
 
-The workflow builds two copies from that same archive on the same runner:
+The workflow builds two copies from that same generated source on the same
+runner:
 
-- `libressl`: unmodified 4.3.2 baseline
-- `libressl-patched`: 4.3.2 with
+- `libressl`: unmodified OpenBSD `master` baseline
+- `libressl-patched`: the same `master` revision with
   `patches/libressl/lazy-tls13-receive-buffer.patch` applied
 
 An OpenBSD tree patch normally names files below `lib/libssl/`; the corresponding
@@ -131,9 +133,9 @@ patch with `patch -p1`, so a checked-in patch should use paths such as
 `a/ssl/tls13_record.c` and `b/ssl/tls13_record.c`.
 
 To test a different change, replace the checked-in patch, confirm that it applies
-to the pinned LibreSSL release, and push the branch or open a pull request. The
-Actions summary reports `Patched / baseline`; values above 1.0 are faster. Raw
-samples for both builds remain in the LibreSSL artifact.
+to the current LibreSSL development source, and push the branch or open a pull
+request. The Actions summary reports `Patched / baseline`; values above 1.0 are
+faster. Raw samples for both builds remain in the LibreSSL artifact.
 
 ### GitHub Actions
 
@@ -141,14 +143,14 @@ The `Benchmark` workflow runs natively on both x86_64 (`ubuntu-24.04`) and
 ARM64 (`ubuntu-24.04-arm`) GitHub-hosted runners. On each architecture it
 downloads and verifies the official OpenSSL 3.5.7 LTS release, then builds it
 from source as static libraries. It does not use Ubuntu's `libssl-dev`. Both
-baseline and patched LibreSSL are also built from the pinned official LibreSSL
-Portable 4.3.2 archive. CI then runs the complete AEAD and TLS 1.3 matrices with
-three 100 ms samples per case and uploads the raw JSON Lines files as workflow
-artifacts for 14 days.
+baseline and patched LibreSSL are built from the current official LibreSSL
+Portable/OpenBSD development branches. CI then runs the complete AEAD and TLS
+1.3 matrices with three 100 ms samples per case and uploads the raw JSON Lines
+files as workflow artifacts for 14 days.
 
-OpenSSL and LibreSSL versions and SHA-256 values are declared in the workflow's
-top-level `env` section. Update the version and checksum together when changing
-a pinned release.
+The OpenSSL version and SHA-256 are declared in the workflow's top-level `env`
+section. `LIBRESSL_REF` selects the LibreSSL Portable development branch; its
+`OPENBSD_BRANCH` file selects the corresponding OpenBSD branch.
 The workflow runs for pushes, pull requests, and manual dispatches.
 
 Each backend job publishes a Markdown table to its GitHub Actions Job Summary.

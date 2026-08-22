@@ -16,8 +16,7 @@ concurrency:
 env:
   OPENSSL_VERSION: 3.5.7
   OPENSSL_SHA256: a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8
-  LIBRESSL_VERSION: 4.3.2
-  LIBRESSL_SHA256: edf01aee24c65d69e6a9efcb9d44bcda682ff9d4f3bbbd95e794e1dfa90847b5
+  LIBRESSL_REF: master
 
 jobs:
   openssl:
@@ -120,7 +119,7 @@ jobs:
           retention-days: 14
 
   libressl:
-    name: LibreSSL 4.3.2 baseline and patched (${{ matrix.arch }})
+    name: LibreSSL master baseline and patched (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -139,25 +138,24 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install --yes cmake ninja-build patch
+        run: >-
+          sudo apt-get update && sudo apt-get install --yes
+          autoconf automake build-essential cmake git libtool ninja-build patch perl
 
-      - name: Download and verify LibreSSL
-        working-directory: ${{ runner.temp }}
+      - name: Prepare LibreSSL from the OpenBSD development branch
         run: |
-          curl --fail --location --retry 3 \
-            --output "libressl-${LIBRESSL_VERSION}.tar.gz" \
-            "https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-${LIBRESSL_VERSION}.tar.gz"
-          echo "${LIBRESSL_SHA256}  libressl-${LIBRESSL_VERSION}.tar.gz" | sha256sum --check --strict
-          mkdir libressl-baseline-source libressl-patched-source
-          tar --extract --gzip --file "libressl-${LIBRESSL_VERSION}.tar.gz" \
-            --strip-components=1 --directory libressl-baseline-source
-          tar --extract --gzip --file "libressl-${LIBRESSL_VERSION}.tar.gz" \
-            --strip-components=1 --directory libressl-patched-source
+          git clone --depth 1 --branch "${LIBRESSL_REF}" \
+            https://github.com/libressl/portable.git \
+            "${RUNNER_TEMP}/libressl-source"
+          cd "${RUNNER_TEMP}/libressl-source"
+          ./autogen.sh
+          echo "LIBRESSL_PORTABLE_COMMIT=$(git rev-parse HEAD)" >> "${GITHUB_ENV}"
+          echo "LIBRESSL_OPENBSD_COMMIT=$(git -C openbsd rev-parse HEAD)" >> "${GITHUB_ENV}"
 
       - name: Configure baseline LibreSSL
         run: >-
           cmake
-          -S "${RUNNER_TEMP}/libressl-baseline-source"
+          -S "${RUNNER_TEMP}/libressl-source"
           -B "${RUNNER_TEMP}/libressl-baseline-build"
           -G Ninja
           -DCMAKE_BUILD_TYPE=Release
@@ -183,13 +181,13 @@ jobs:
       - name: Apply LibreSSL patch under test
         run: >-
           patch -N -t -p1
-          -d "${RUNNER_TEMP}/libressl-patched-source"
+          -d "${RUNNER_TEMP}/libressl-source"
           -i "${GITHUB_WORKSPACE}/patches/libressl/lazy-tls13-receive-buffer.patch"
 
       - name: Configure patched LibreSSL
         run: >-
           cmake
-          -S "${RUNNER_TEMP}/libressl-patched-source"
+          -S "${RUNNER_TEMP}/libressl-source"
           -B "${RUNNER_TEMP}/libressl-patched-build"
           -G Ninja
           -DCMAKE_BUILD_TYPE=Release
@@ -240,15 +238,21 @@ jobs:
           print(f"validated baseline and patched LibreSSL results")'
 
       - name: Publish LibreSSL job summary
-        run: >-
-          python3 scripts/summarize_results.py results
-          --title "LibreSSL benchmark results (${{ matrix.arch }})"
-          --output "${GITHUB_STEP_SUMMARY}"
+        run: |
+          {
+            echo "LibreSSL Portable commit: \`${LIBRESSL_PORTABLE_COMMIT}\`"
+            echo
+            echo "OpenBSD source commit: \`${LIBRESSL_OPENBSD_COMMIT}\`"
+            echo
+          } >> "${GITHUB_STEP_SUMMARY}"
+          python3 scripts/summarize_results.py results \
+            --title "LibreSSL benchmark results (${{ matrix.arch }})" \
+            --output "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload benchmark result
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: benchmark-libressl-${{ env.LIBRESSL_VERSION }}-${{ matrix.arch }}-${{ github.sha }}
+          name: benchmark-libressl-${{ env.LIBRESSL_REF }}-${{ matrix.arch }}-${{ github.sha }}
           path: results/*.jsonl
           if-no-files-found: error
           retention-days: 14
