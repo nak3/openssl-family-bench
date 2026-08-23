@@ -1,0 +1,58 @@
+diff --git a/ssl/tls13_record_layer.c b/ssl/tls13_record_layer.c
+index 778356a..248afed 100644
+--- a/ssl/tls13_record_layer.c
++++ b/ssl/tls13_record_layer.c
+@@ -692,8 +692,8 @@ static int
+ tls13_record_layer_seal_record_protected(struct tls13_record_layer *rl,
+     uint8_t content_type, const uint8_t *content, size_t content_len)
+ {
+-	uint8_t *data = NULL, *header = NULL, *inner = NULL;
+-	size_t data_len = 0, header_len = 0, inner_len = 0;
++	uint8_t *data = NULL, *inner = NULL;
++	size_t data_len = 0, inner_len = 0;
+ 	uint8_t *enc_record;
+ 	size_t enc_record_len;
+ 	ssize_t ret = 0;
+@@ -724,23 +724,15 @@ tls13_record_layer_seal_record_protected(struct tls13_record_layer *rl,
+ 	if (enc_record_len > TLS13_RECORD_MAX_CIPHERTEXT_LEN)
+ 		goto err;
+ 
+-	/* Build the record header. */
+-	if (!CBB_init(&cbb, TLS13_RECORD_HEADER_LEN))
++	/* Build the actual record. */
++	if (!CBB_init(&cbb, TLS13_RECORD_HEADER_LEN + enc_record_len))
+ 		goto err;
+ 	if (!CBB_add_u8(&cbb, SSL3_RT_APPLICATION_DATA))
+ 		goto err;
+ 	if (!CBB_add_u16(&cbb, TLS1_2_VERSION))
+ 		goto err;
+ 	if (!CBB_add_u16(&cbb, enc_record_len))
+ 		goto err;
+-	if (!CBB_finish(&cbb, &header, &header_len))
+-		goto err;
+-
+-	/* Build the actual record. */
+-	if (!CBB_init(&cbb, TLS13_RECORD_HEADER_LEN + enc_record_len))
+-		goto err;
+-	if (!CBB_add_bytes(&cbb, header, header_len))
+-		goto err;
+ 	if (!CBB_add_space(&cbb, &enc_record, enc_record_len))
+ 		goto err;
+ 	if (!CBB_finish(&cbb, &data, &data_len))
+@@ -759,7 +751,7 @@ tls13_record_layer_seal_record_protected(struct tls13_record_layer *rl,
+ 	if (!EVP_AEAD_CTX_seal(rl->write->aead_ctx,
+ 	    enc_record, &out_len, enc_record_len,
+ 	    rl->write->nonce.data, rl->write->nonce.len,
+-	    inner, inner_len, header, header_len))
++	    inner, inner_len, data, TLS13_RECORD_HEADER_LEN))
+ 		goto err;
+ 
+ 	if (out_len != enc_record_len)
+@@ -782,7 +774,6 @@ tls13_record_layer_seal_record_protected(struct tls13_record_layer *rl,
+ 	CBB_cleanup(&cbb);
+ 
+ 	freezero(data, data_len);
+-	freezero(header, header_len);
+ 	freezero(inner, inner_len);
+ 
+ 	return ret;

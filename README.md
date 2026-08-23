@@ -124,7 +124,7 @@ runner:
 
 - `libressl`: unmodified OpenBSD `master` baseline
 - `libressl-patched`: the same `master` revision with
-  `patches/libressl/stack-tls13-record-header.patch` applied
+  `patches/libressl/direct-tls13-record-header.patch` applied
 
 An OpenBSD tree patch normally names files below `lib/libssl/`; the corresponding
 LibreSSL Portable path is `ssl/`. Port the file paths and any platform-specific
