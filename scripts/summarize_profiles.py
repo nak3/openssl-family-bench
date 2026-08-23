@@ -2,9 +2,11 @@
 
 import argparse
 import csv
+import json
 import math
 from pathlib import Path
 import re
+import statistics
 
 
 CASE_PATTERN = re.compile(
@@ -16,6 +18,13 @@ HOTSPOT_PATTERN = re.compile(r"^\s*([0-9]+(?:\.[0-9]+)?)%\s+(.+?)\s*$")
 SUSPICIOUS_CHACHA_PREFIXES = (
     "ASN1_", "CBS_", "CAST_", "Camellia_", "ERR_load_",
 )
+BACKEND_LABELS = {
+    "openssl": "OpenSSL",
+    "libressl": "LibreSSL",
+    "libressl-patched": "Patched",
+}
+BACKEND_PRIORITY = {"openssl": 0, "libressl": 1, "libressl-patched": 2}
+CATEGORY_PRIORITY = {"aead": 0, "primitive": 1, "tls": 2}
 
 
 def parse_case(path):
@@ -56,6 +65,29 @@ def parse_stat(path):
     return counters
 
 
+def parse_benchmark(path):
+    if not path.exists():
+        return None
+    rows = []
+    with path.open(encoding="utf-8") as stream:
+        for line in stream:
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(row, dict):
+                rows.append(row)
+    for field, unit in (
+        ("mib_per_second", "MiB/s"),
+        ("handshakes_per_second", "handshakes/s"),
+        ("iterations", "iterations"),
+    ):
+        values = [row[field] for row in rows if isinstance(row.get(field), (int, float))]
+        if values:
+            return {"value": statistics.median(values), "unit": unit}
+    return None
+
+
 def parse_hotspots(path, profiler, limit=10):
     hotspots = []
     with path.open(encoding="utf-8", errors="replace") as stream:
@@ -89,6 +121,153 @@ def format_counter(value):
     if abs(value) >= 1000:
         return f"{value:,.0f}"
     return f"{value:,.2f}"
+
+
+def format_measurement(measurement):
+    if measurement is None:
+        return "—"
+    value = measurement["value"]
+    unit = measurement["unit"]
+    if unit == "iterations":
+        return f"{value:,.0f} {unit}"
+    if value >= 1000:
+        return f"{value:,.0f} {unit}"
+    return f"{value:,.1f} {unit}"
+
+
+def format_ratio(numerator, denominator):
+    if numerator is None or denominator is None:
+        return "—"
+    if numerator["unit"] != denominator["unit"] or denominator["value"] == 0:
+        return "—"
+    return f"**{numerator['value'] / denominator['value']:.2f}×**"
+
+
+def median_ratio(keys, measurements, numerator_backend, denominator_backend):
+    ratios = []
+    for key in keys:
+        numerator = measurements.get((key, numerator_backend))
+        denominator = measurements.get((key, denominator_backend))
+        if (
+            numerator is not None
+            and denominator is not None
+            and numerator["unit"] == denominator["unit"]
+            and denominator["value"] != 0
+        ):
+            ratios.append(numerator["value"] / denominator["value"])
+    if not ratios:
+        return "—"
+    return f"**{statistics.median(ratios):.2f}×**"
+
+
+def case_sort_key(case):
+    operation_priority = {"handshake": 0, "transfer": 1}
+    return (
+        case["subject"],
+        operation_priority.get(case["operation"], 2),
+        case["operation"],
+        case["size"],
+    )
+
+
+def case_size_label(case):
+    if case["category"] == "tls" and case["operation"] == "handshake":
+        return "—"
+    return f"{case['size']:,} B"
+
+
+def render_overview(lines, selected):
+    measurements = {}
+    cases_by_key = {}
+    for case, stat_path in selected:
+        stem = stat_path.name[:-len(".stat.csv")]
+        benchmark_path = stat_path.with_name(stem + ".benchmark.jsonl")
+        key = (case["category"], case["subject"], case["operation"], case["size"])
+        cases_by_key[key] = case
+        measurements[(key, case["backend"])] = parse_benchmark(benchmark_path)
+
+    available = [value for value in measurements.values() if value is not None]
+    lines.extend([
+        "## Performance comparison",
+        "",
+        ("> Higher values are better. Ratios above 1.00× favor the numerator. "
+         "These runs use instrumented binaries, so use the Benchmark workflow "
+         "for final performance numbers."),
+        "",
+    ])
+    if not available:
+        lines.extend([
+            "> No captured benchmark results were found. This is expected for profiles",
+            "> produced before benchmark-result capture was added.",
+            "",
+        ])
+        return
+
+    categories = sorted(
+        {key[0] for key in cases_by_key},
+        key=lambda name: (CATEGORY_PRIORITY.get(name, 99), name),
+    )
+    lines.extend([
+        "### Quick comparison",
+        "",
+        "| Workload | Median OpenSSL / LibreSSL | Median patched / baseline |",
+        "| --- | ---: | ---: |",
+    ])
+    for category in categories:
+        keys = [key for key in cases_by_key if key[0] == category]
+        lines.append(
+            f"| `{category.upper()}` | "
+            f"{median_ratio(keys, measurements, 'openssl', 'libressl')} | "
+            f"{median_ratio(keys, measurements, 'libressl-patched', 'libressl')} |"
+        )
+    lines.extend([
+        "",
+        "> The medians summarize case-by-case ratios; expand the tables below before",
+        "> drawing conclusions about a specific cipher, operation, or message size.",
+        "",
+    ])
+    for category in categories:
+        keys = [key for key in cases_by_key if key[0] == category]
+        keys.sort(key=lambda key: case_sort_key(cases_by_key[key]))
+        category_backends = {
+            backend for key in keys for backend in BACKEND_LABELS
+            if measurements.get((key, backend)) is not None
+        }
+        show_patched = "libressl-patched" in category_backends
+        lines.extend([f"### {category.upper()}", ""])
+        headers = ["Case", "Operation", "Size", "OpenSSL", "LibreSSL"]
+        separators = ["---", "---", "---:", "---:", "---:"]
+        if show_patched:
+            headers.append("Patched")
+            separators.append("---:")
+        headers.append("OpenSSL / LibreSSL")
+        separators.append("---:")
+        if show_patched:
+            headers.append("Patched / baseline")
+            separators.append("---:")
+        lines.extend([
+            "| " + " | ".join(headers) + " |",
+            "| " + " | ".join(separators) + " |",
+        ])
+        for key in keys:
+            case = cases_by_key[key]
+            openssl = measurements.get((key, "openssl"))
+            libressl = measurements.get((key, "libressl"))
+            patched = measurements.get((key, "libressl-patched"))
+            row = [
+                f"`{escape(case['subject'])}`",
+                f"`{escape(case['operation'])}`",
+                case_size_label(case),
+                format_measurement(openssl),
+                format_measurement(libressl),
+            ]
+            if show_patched:
+                row.append(format_measurement(patched))
+            row.append(format_ratio(openssl, libressl))
+            if show_patched:
+                row.append(format_ratio(patched, libressl))
+            lines.append("| " + " | ".join(row) + " |")
+        lines.append("")
 
 
 def suspicious_chacha_symbols(case, profiler, hotspots):
@@ -197,25 +376,29 @@ def render(paths, title):
     lines = [
         f"# {title}",
         "",
-        "> Profiles use separate instrumented builds and are not benchmark scores.",
         "> Hotspots use perf sampling when available and a PMU-independent gprof fallback otherwise.",
         "",
     ]
     for architecture in architectures:
         lines.extend([f"## Architecture: `{architecture}`", ""])
+        architecture_cases = [
+            (case, path) for case, path in cases
+            if case["architecture"] == architecture
+        ]
+        render_overview(lines, architecture_cases)
+        lines.extend(["## Detailed counters and hotspots", ""])
         categories = sorted({
             case["category"] for case, _ in cases
             if case["architecture"] == architecture
-        }, key=lambda name: ({"aead": 0, "primitive": 1, "tls": 2}.get(name, 99), name))
+        }, key=lambda name: (CATEGORY_PRIORITY.get(name, 99), name))
         for category in categories:
             lines.extend([f"### Category: `{category.upper()}`", ""])
             backends = sorted({
                 case["backend"] for case, _ in cases
                 if case["architecture"] == architecture
                 and case["category"] == category
-            })
+            }, key=lambda name: (BACKEND_PRIORITY.get(name, 99), name))
             for backend in backends:
-                lines.extend([f"#### Backend: `{backend}`", ""])
                 selected = [
                     (case, path) for case, path in cases
                     if case["architecture"] == architecture
@@ -225,8 +408,16 @@ def render(paths, title):
                 selected.sort(key=lambda item: (
                     item[0]["subject"], item[0]["operation"], item[0]["size"]
                 ))
+                label = BACKEND_LABELS.get(backend, backend)
+                case_word = "case" if len(selected) == 1 else "cases"
+                lines.extend([
+                    "<details>",
+                    f"<summary><strong>{escape(label)}</strong> — {len(selected)} {case_word}</summary>",
+                    "",
+                ])
                 for _, path in selected:
                     render_case(lines, path)
+                lines.extend(["</details>", ""])
     return "\n".join(lines).rstrip() + "\n"
 
 

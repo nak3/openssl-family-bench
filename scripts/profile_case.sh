@@ -57,6 +57,7 @@ fi
 
 stem="${backend}__${architecture}__${category}__${subject}__${operation}__${message_size}"
 stat_path="${output_directory}/${stem}.stat.csv"
+benchmark_path="${output_directory}/${stem}.benchmark.jsonl"
 mode_path="${output_directory}/${stem}.mode"
 sampling_path="${output_directory}/${stem}.sampling"
 data_path="${output_directory}/${stem}.perf.data"
@@ -86,7 +87,7 @@ run_perf stat \
     --repeat "${sample_repeat}" \
     --event "${counter_events}" \
     --output "${stat_path}" \
-    -- "${command[@]}" >/dev/null
+    -- "${command[@]}" > "${benchmark_path}"
 
 sampling_event=unavailable
 : > "${record_error_path}"
@@ -164,6 +165,7 @@ else
 fi
 
 run_privileged chmod 0644 "${stat_path}"
+run_privileged chmod 0644 "${benchmark_path}"
 if [[ -f ${data_path} ]]; then
     run_privileged chmod 0644 "${data_path}"
 fi

@@ -277,20 +277,24 @@ jobs:
       - name: Publish profile visualization
         run: |
           python3 scripts/summarize_profiles.py profiles \
-            --title "Crypto perf profiles (${{ matrix.arch }})" \
+            --title "Crypto profile comparison (${{ matrix.arch }})" \
             --output profile-summary.md
+          cat profile-summary.md >> "${GITHUB_STEP_SUMMARY}"
           {
+            echo '## Run metadata'
+            echo
             echo "LibreSSL Portable commit: \`${LIBRESSL_PORTABLE_COMMIT}\`"
             echo
             echo "OpenBSD source commit: \`${LIBRESSL_OPENBSD_COMMIT}\`"
             echo
-            echo '## Runner CPU'
+            echo '<details>'
+            echo '<summary><strong>Runner CPU details</strong></summary>'
             echo
             echo '```text'
             lscpu | grep -E '^(Architecture|Model name|CPU\(s\)|Thread|Core|Socket|Flags|Features):'
             echo '```'
             echo
-            cat profile-summary.md
+            echo '</details>'
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload perf profiles

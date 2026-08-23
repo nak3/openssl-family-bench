@@ -187,12 +187,15 @@ The profile matrix covers:
 The regular `Benchmark` workflow remains separate and does not show skipped
 profiling placeholders on pushes or pull requests.
 
-Each profiling Job Summary contains the runner CPU description, available
-hardware or software counters, and text bar charts for the hottest symbols.
-The Job Summary groups profiles by architecture, workload category, and backend,
-so profiles can be inspected without downloading an artifact. The corresponding
-artifact contains the CSV counters, full text reports, and
-`perf.data` recordings for local `perf report` or `perf annotate` analysis.
+Each profiling Job Summary starts with OpenSSL/LibreSSL and patched/baseline
+comparison tables. It reports a quick median ratio by workload and per-case
+throughput or operation counts; higher ratios favor the numerator. Because these
+measurements use instrumented binaries, use the regular `Benchmark` workflow for
+final performance numbers. Detailed hardware or software counters and text bar
+charts for the hottest symbols are grouped by architecture, workload category,
+and backend in collapsed sections. The corresponding artifact contains the
+captured benchmark JSON, CSV counters, full text reports, and `perf.data`
+recordings for local `perf report` or `perf annotate` analysis.
 Some hosted runner PMUs support counting but not sampling interrupts on either
 architecture. In that case the workflow keeps the `perf stat` counter
 visualization and automatically uses a separate `gprof`-instrumented executable
