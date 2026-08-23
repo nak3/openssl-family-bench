@@ -182,7 +182,7 @@ jobs:
         run: >-
           patch -N -t -p1
           -d "${RUNNER_TEMP}/libressl-source"
-          -i "${GITHUB_WORKSPACE}/patches/libressl/lazy-tls13-receive-buffer.patch"
+          -i "${GITHUB_WORKSPACE}/patches/libressl/stack-tls13-record-header.patch"
 
       - name: Configure patched LibreSSL
         run: >-

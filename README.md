@@ -124,7 +124,7 @@ runner:
 
 - `libressl`: unmodified OpenBSD `master` baseline
 - `libressl-patched`: the same `master` revision with
-  `patches/libressl/lazy-tls13-receive-buffer.patch` applied
+  `patches/libressl/stack-tls13-record-header.patch` applied
 
 An OpenBSD tree patch normally names files below `lib/libssl/`; the corresponding
 LibreSSL Portable path is `ssl/`. Port the file paths and any platform-specific
@@ -181,7 +181,7 @@ The profile matrix covers:
 - all AEAD workloads: AES-128-GCM, AES-256-GCM, and ChaCha20-Poly1305;
 - AES-128/256-CBC encrypt/decrypt, SHA-256/512, and HMAC-SHA256;
 - TLS 1.3 handshake and transfer for all three supported cipher suites;
-- patched LibreSSL TLS workloads, where the record-buffer patch can affect the
+- patched LibreSSL TLS workloads, where the record-header patch can affect the
   call profile directly.
 
 The regular `Benchmark` workflow remains separate and does not show skipped
